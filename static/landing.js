@@ -1,12 +1,12 @@
 const bgGrid = document.getElementById("bg-grid");
 
 const screenshotGallery = [
-  "/static/uploads/landing1.png",
-  "/static/uploads/landing2.png",
-  "/static/uploads/landing3.png",
-  "/static/uploads/landing4.png",
-  "/static/uploads/landing5.png",
-  "/static/uploads/landing6.png",
+  "/static/assets/landing/landing1.png",
+  "/static/assets/landing/landing2.png",
+  "/static/assets/landing/landing3.png",
+  "/static/assets/landing/landing4.png",
+  "/static/assets/landing/landing5.png",
+  "/static/assets/landing/landing6.png",
 ];
 
 const runtimeGallery = [
