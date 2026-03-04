@@ -90,8 +90,21 @@ from .schemas import (
 
 MENTION_PATTERN = re.compile(r"@([a-zA-Z0-9_]{3,40})")
 EMAIL_PATTERN = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,63}$", re.IGNORECASE)
-UPLOAD_DIR = Path("static/uploads")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+def _resolve_upload_storage() -> tuple[Path, str]:
+    candidates = (
+        (Path("static/uploads"), "static/uploads"),
+        (Path("/tmp/stepnix-uploads"), "uploads"),
+    )
+    for path, public_prefix in candidates:
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            return path, public_prefix
+        except OSError:
+            continue
+    raise RuntimeError("No writable upload directory available")
+
+
+UPLOAD_DIR, UPLOAD_PATH_PREFIX = _resolve_upload_storage()
 ALLOWED_IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 ALLOWED_VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm"}
 ALLOWED_REACTIONS = {"like", "love", "celebrate"}
@@ -616,6 +629,8 @@ def _startup_database_init() -> None:
         print(f"[startup] database init skipped: {exc}")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+if UPLOAD_PATH_PREFIX == "uploads":
+    app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 
 def _page(name: str) -> FileResponse:
@@ -697,7 +712,7 @@ def _save_image(file: UploadFile) -> str:
     target = UPLOAD_DIR / file_name
     with target.open("wb") as buffer:
         buffer.write(file.file.read())
-    return f"static/uploads/{file_name}"
+    return f"{UPLOAD_PATH_PREFIX}/{file_name}"
 
 
 def _save_post_media(file: UploadFile) -> str:
@@ -713,7 +728,7 @@ def _save_post_media(file: UploadFile) -> str:
     target = UPLOAD_DIR / file_name
     with target.open("wb") as buffer:
         buffer.write(file.file.read())
-    return f"static/uploads/{file_name}"
+    return f"{UPLOAD_PATH_PREFIX}/{file_name}"
 
 
 def _save_upload_file(file: UploadFile, allowed_ext: set[str]) -> tuple[str, str]:
@@ -728,7 +743,7 @@ def _save_upload_file(file: UploadFile, allowed_ext: set[str]) -> tuple[str, str
     target = UPLOAD_DIR / file_name
     with target.open("wb") as buffer:
         buffer.write(file.file.read())
-    return file_name, f"static/uploads/{file_name}"
+    return file_name, f"{UPLOAD_PATH_PREFIX}/{file_name}"
 
 
 def _ffprobe_duration_seconds(abs_path: Path) -> int:
@@ -789,7 +804,7 @@ def _split_video_to_minute_chunks(abs_path: Path, original_name: str) -> list[st
     chunks = sorted(UPLOAD_DIR.glob(pattern.name.replace("%03d", "*")))
     if not chunks:
         raise HTTPException(status_code=500, detail="Video split produced no parts")
-    return [f"static/uploads/{chunk.name}" for chunk in chunks]
+    return [f"{UPLOAD_PATH_PREFIX}/{chunk.name}" for chunk in chunks]
 
 
 def _hash_password(password: str) -> str:
