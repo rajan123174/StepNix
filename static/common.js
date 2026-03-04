@@ -2,6 +2,38 @@ function getToken() {
   return localStorage.getItem("authToken") || "";
 }
 
+function getAppConfig() {
+  return window.APP_CONFIG || {};
+}
+
+function getApiBaseUrl() {
+  const configured = String(getAppConfig().API_BASE_URL || "").trim();
+  if (!configured) return "";
+  return configured.replace(/\/+$/, "");
+}
+
+function resolveApiUrl(path) {
+  const target = String(path || "");
+  if (/^https?:\/\//i.test(target)) return target;
+  const base = getApiBaseUrl();
+  if (!base) return target;
+  return `${base}${target.startsWith("/") ? "" : "/"}${target}`;
+}
+
+function resolveWsUrl(path) {
+  const target = String(path || "");
+  if (/^wss?:\/\//i.test(target)) return target;
+  const configured = String(getAppConfig().WS_BASE_URL || "").trim();
+  if (configured) {
+    const base = configured.replace(/\/+$/, "");
+    return `${base}${target.startsWith("/") ? "" : "/"}${target}`;
+  }
+  const origin = getApiBaseUrl() || window.location.origin;
+  const url = new URL(target || "/", origin);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}
+
 function setAuth(token, user) {
   localStorage.setItem("authToken", token);
   localStorage.setItem("authUser", JSON.stringify(user));
@@ -53,7 +85,7 @@ async function api(path, options = {}) {
   const token = getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(path, { ...options, headers });
+  const response = await fetch(resolveApiUrl(path), { ...options, headers });
   if (!response.ok) {
     const error = await response
       .json()
@@ -638,8 +670,7 @@ function initNotificationCenter() {
     if (!("WebSocket" in window)) return;
     if (!getToken()) return;
     if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
-    const wsUrl = new URL("/ws/notifications", window.location.origin);
-    wsUrl.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = new URL(resolveWsUrl("/ws/notifications"));
     wsUrl.searchParams.set("token", getToken());
     socket = new WebSocket(wsUrl.toString());
     socket.onmessage = (event) => {
@@ -809,11 +840,15 @@ window.App = {
   setAuth,
   clearAuth,
   getAuthUser,
+  getAppConfig,
+  getApiBaseUrl,
   getTheme,
   setTheme,
   getToken,
   renderRichBio,
   mentionMarkup,
+  resolveApiUrl,
+  resolveWsUrl,
   requireAuth,
   playActionBurst,
   initGlassPageTransitions,

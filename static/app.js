@@ -8,7 +8,8 @@ const postTemplate = document.getElementById("post-template");
 let users = [];
 
 async function api(path, options = {}) {
-  const response = await fetch(path, options);
+  const target = window.App?.resolveApiUrl ? window.App.resolveApiUrl(path) : path;
+  const response = await fetch(target, options);
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Request failed" }));
     throw new Error(error.detail || "Request failed");

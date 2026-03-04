@@ -233,7 +233,8 @@ function shareChatHeaders() {
 async function shareChatApi(path, options = {}) {
   const headers = new Headers(options.headers || {});
   shareChatHeaders().forEach((value, key) => headers.set(key, value));
-  const response = await fetch(path, { ...options, headers });
+  const target = window.App?.resolveApiUrl ? window.App.resolveApiUrl(path) : path;
+  const response = await fetch(target, { ...options, headers });
   if (!response.ok) {
     const error = await response
       .json()

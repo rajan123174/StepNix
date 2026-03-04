@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import importlib
 import json
 import os
 import re
@@ -12,6 +13,7 @@ import subprocess
 import time
 import uuid
 from collections import defaultdict
+from contextlib import suppress
 from urllib import parse, request
 from base64 import b64encode, urlsafe_b64decode, urlsafe_b64encode
 from datetime import datetime, timedelta, timezone
@@ -36,6 +38,21 @@ try:
     import faiss  # type: ignore
 except Exception:
     faiss = None
+
+try:
+    boto3 = importlib.import_module("boto3")
+except Exception:
+    boto3 = None
+
+try:
+    BotoConfig = getattr(importlib.import_module("botocore.client"), "Config")
+except Exception:
+    BotoConfig = None
+
+try:
+    redis = importlib.import_module("redis")
+except Exception:
+    redis = None
 
 from .database import Base, engine, get_db
 from .models import (
@@ -112,11 +129,18 @@ CHAT_OTP_EXPIRY_MINUTES = 5
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 ENFORCE_OTP_LIMITS = os.getenv("ENFORCE_OTP_LIMITS", "0" if APP_ENV == "development" else "1") == "1"
 FEED_RANKER_MODE = os.getenv("FEED_RANKER_MODE", "heuristic").strip().lower()
+FEED_CACHE_TTL_SECONDS = max(5, int(os.getenv("FEED_CACHE_TTL_SECONDS", "20") or "20"))
 try:
     _feed_dim_raw = int(os.getenv("FEED_EMBED_DIM", "256"))
 except ValueError:
     _feed_dim_raw = 256
 FEED_EMBED_DIM = max(64, min(1024, _feed_dim_raw))
+REDIS_URL = (os.getenv("REDIS_URL") or "").strip()
+S3_BUCKET_NAME = (os.getenv("S3_BUCKET_NAME") or "").strip()
+AWS_ACCESS_KEY = (os.getenv("AWS_ACCESS_KEY") or "").strip()
+AWS_SECRET_KEY = (os.getenv("AWS_SECRET_KEY") or "").strip()
+AWS_REGION = (os.getenv("AWS_REGION") or "us-east-1").strip()
+FAISS_INDEX_PATH = (os.getenv("FAISS_INDEX_PATH") or "").strip()
 HELP_CENTER_EMAIL = "stepnix627@gmail.com"
 HELP_CENTER_TOPICS = {
     "bug": "Reported a bug",
@@ -179,6 +203,198 @@ class NotificationHub:
 
 
 notification_hub = NotificationHub()
+_redis_client: Any | None = None
+_s3_client: Any | None = None
+_persisted_faiss_index: Any | None = None
+_persisted_faiss_post_ids: list[int] = []
+
+
+def _get_redis_client() -> Any | None:
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+    if redis is None or not REDIS_URL:
+        return None
+    try:
+        _redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+    except Exception:
+        _redis_client = None
+    return _redis_client
+
+
+def _redis_get(key: str) -> str | None:
+    client = _get_redis_client()
+    if client is None:
+        return None
+    try:
+        value = client.get(key)
+    except Exception:
+        return None
+    return str(value) if value is not None else None
+
+
+def _redis_setex(key: str, ttl: int, value: str) -> None:
+    client = _get_redis_client()
+    if client is None:
+        return
+    with suppress(Exception):
+        client.setex(key, ttl, value)
+
+
+def _redis_delete(*keys: str) -> None:
+    client = _get_redis_client()
+    if client is None or not keys:
+        return
+    with suppress(Exception):
+        client.delete(*keys)
+
+
+def _redis_incr(key: str) -> int:
+    client = _get_redis_client()
+    if client is None:
+        return 0
+    try:
+        return int(client.incr(key))
+    except Exception:
+        return 0
+
+
+def _redis_publish(channel: str, payload: dict[str, Any]) -> None:
+    client = _get_redis_client()
+    if client is None:
+        return
+    with suppress(Exception):
+        client.publish(channel, json.dumps(payload, default=str))
+
+
+def _feed_cache_version() -> int:
+    raw = _redis_get("feed:version")
+    if not raw:
+        return 0
+    try:
+        return int(raw)
+    except ValueError:
+        return 0
+
+
+def _bump_feed_cache_version() -> None:
+    _redis_incr("feed:version")
+
+
+def _feed_cache_key(user_id: int) -> str:
+    return f"feed:{user_id}:v{_feed_cache_version()}"
+
+
+def _notification_count_key(user_id: int) -> str:
+    return f"notifications:unread:{user_id}"
+
+
+def _invalidate_notification_counts(*user_ids: int) -> None:
+    keys = [_notification_count_key(user_id) for user_id in user_ids if user_id]
+    if keys:
+        _redis_delete(*keys)
+
+
+def _get_s3_client() -> Any | None:
+    global _s3_client
+    if _s3_client is not None:
+        return _s3_client
+    if boto3 is None or BotoConfig is None or not S3_BUCKET_NAME:
+        return None
+    try:
+        _s3_client = boto3.client(
+            "s3",
+            aws_access_key_id=AWS_ACCESS_KEY or None,
+            aws_secret_access_key=AWS_SECRET_KEY or None,
+            region_name=AWS_REGION,
+            config=BotoConfig(signature_version="s3v4"),
+        )
+    except Exception:
+        _s3_client = None
+    return _s3_client
+
+
+def _s3_public_url(key: str) -> str:
+    return f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{key}"
+
+
+def _upload_bytes_to_s3(data: bytes, filename: str, *, folder: str, content_type: str = "") -> str | None:
+    client = _get_s3_client()
+    if client is None:
+        return None
+    ext = Path(filename).suffix.lower()
+    key = f"{folder.strip('/')}/{uuid.uuid4().hex}{ext}"
+    extra_args: dict[str, Any] = {}
+    if content_type:
+        extra_args["ContentType"] = content_type
+    try:
+        client.put_object(Bucket=S3_BUCKET_NAME, Key=key, Body=data, **extra_args)
+    except Exception:
+        return None
+    return _s3_public_url(key)
+
+
+def _upload_local_file_to_s3(local_path: Path, *, folder: str) -> str | None:
+    client = _get_s3_client()
+    if client is None or not local_path.exists():
+        return None
+    key = f"{folder.strip('/')}/{uuid.uuid4().hex}{local_path.suffix.lower()}"
+    extra_args: dict[str, Any] = {}
+    suffix = local_path.suffix.lower()
+    if suffix in ALLOWED_VIDEO_EXT:
+        extra_args["ContentType"] = "video/mp4" if suffix == ".mp4" else "application/octet-stream"
+    elif suffix in ALLOWED_IMAGE_EXT:
+        extra_args["ContentType"] = "image/jpeg" if suffix in {".jpg", ".jpeg"} else "application/octet-stream"
+    try:
+        if extra_args:
+            client.upload_file(str(local_path), S3_BUCKET_NAME, key, ExtraArgs=extra_args)
+        else:
+            client.upload_file(str(local_path), S3_BUCKET_NAME, key)
+    except Exception:
+        return None
+    return _s3_public_url(key)
+
+
+def _persist_local_media_path(path_value: str, *, folder: str) -> str:
+    if path_value.startswith("http://") or path_value.startswith("https://"):
+        return path_value
+    abs_path = _resolve_local_media_path(path_value)
+    remote_url = _upload_local_file_to_s3(abs_path, folder=folder)
+    if remote_url:
+        with suppress(OSError):
+            abs_path.unlink()
+        return remote_url
+    return path_value
+
+
+def _resolve_local_media_path(path_value: str) -> Path:
+    raw = str(path_value).lstrip("/")
+    if raw.startswith(f"{UPLOAD_PATH_PREFIX}/"):
+        filename = raw[len(UPLOAD_PATH_PREFIX) + 1 :]
+        return UPLOAD_DIR / filename
+    path = Path(raw)
+    if path.is_absolute():
+        return path
+    return Path.cwd() / raw
+
+
+def _load_persisted_faiss_index() -> None:
+    global _persisted_faiss_index, _persisted_faiss_post_ids
+    _persisted_faiss_index = None
+    _persisted_faiss_post_ids = []
+    if not FAISS_INDEX_PATH or faiss is None:
+        return
+    index_path = Path(FAISS_INDEX_PATH)
+    metadata_path = index_path.with_suffix(f"{index_path.suffix}.meta.json")
+    if not index_path.exists() or not metadata_path.exists():
+        return
+    try:
+        _persisted_faiss_index = cast(Any, faiss).read_index(str(index_path))
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        _persisted_faiss_post_ids = [int(item) for item in payload.get("post_ids", [])]
+    except Exception:
+        _persisted_faiss_index = None
+        _persisted_faiss_post_ids = []
 
 def _ensure_schema() -> None:
     with engine.begin() as conn:
@@ -611,6 +827,30 @@ def _ensure_schema() -> None:
         conn.execute(
             text("CREATE INDEX IF NOT EXISTS ix_chat_typing_states_updated_at ON chat_typing_states(updated_at)")
         )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_posts_author_id_created_at ON posts(author_id, created_at DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_posts_created_at ON posts(created_at DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_comments_post_id_created_at ON comments(post_id, created_at DESC)"))
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_notifications_recipient_id_created_at ON notifications(recipient_id, created_at DESC)")
+        )
+        conn.execute(
+            text(
+                """
+                ALTER TABLE chat_messages
+                ADD COLUMN IF NOT EXISTS conversation_id VARCHAR(64)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE chat_messages
+                SET conversation_id = CONCAT(LEAST(sender_id, receiver_id), ':', GREATEST(sender_id, receiver_id))
+                WHERE conversation_id IS NULL
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_chat_messages_conversation_id ON chat_messages(conversation_id)"))
 
 def _initialize_database() -> None:
     Base.metadata.create_all(bind=engine)
@@ -624,6 +864,7 @@ def _startup_database_init() -> None:
     except OperationalError as exc:
         # Keep app import/start resilient when DB is temporarily unavailable.
         print(f"[startup] database init skipped: {exc}")
+    _load_persisted_faiss_index()
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -633,6 +874,11 @@ def _page(name: str) -> FileResponse:
     if not page.exists():
         raise HTTPException(status_code=404, detail="Frontend page not found")
     return FileResponse(page)
+
+
+@app.get("/health")
+def health():
+    return {"status": "running"}
 
 
 @app.get("/")
@@ -702,11 +948,19 @@ def _save_image(file: UploadFile) -> str:
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in ALLOWED_IMAGE_EXT:
         raise HTTPException(status_code=400, detail="Unsupported image format")
-
+    file_bytes = file.file.read()
+    remote_url = _upload_bytes_to_s3(
+        file_bytes,
+        file.filename,
+        folder="profile-photos",
+        content_type=file.content_type or "",
+    )
+    if remote_url:
+        return remote_url
     file_name = f"{uuid.uuid4().hex}{ext}"
     target = UPLOAD_DIR / file_name
     with target.open("wb") as buffer:
-        buffer.write(file.file.read())
+        buffer.write(file_bytes)
     return f"{UPLOAD_PATH_PREFIX}/{file_name}"
 
 
@@ -719,10 +973,19 @@ def _save_post_media(file: UploadFile) -> str:
     if ext not in allowed:
         raise HTTPException(status_code=400, detail="Unsupported media format")
 
+    file_bytes = file.file.read()
+    remote_url = _upload_bytes_to_s3(
+        file_bytes,
+        file.filename,
+        folder="posts",
+        content_type=file.content_type or "",
+    )
+    if remote_url:
+        return remote_url
     file_name = f"{uuid.uuid4().hex}{ext}"
     target = UPLOAD_DIR / file_name
     with target.open("wb") as buffer:
-        buffer.write(file.file.read())
+        buffer.write(file_bytes)
     return f"{UPLOAD_PATH_PREFIX}/{file_name}"
 
 
@@ -1020,9 +1283,20 @@ def _is_chat_message_hidden_for_user(row: ChatMessage, viewer_id: int) -> bool:
     return False
 
 
+def _public_media_url(path: str | None) -> str | None:
+    if not path:
+        return None
+    value = str(path).strip()
+    if not value:
+        return None
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    return f"/{value.lstrip('/')}"
+
+
 def _build_user_out(user: User, db: Session, viewer_id: int | None = None) -> UserOut:
     image_path = user.profile_photo.image_path if user.profile_photo else None
-    photo_url = f"/{image_path}" if image_path else None
+    photo_url = _public_media_url(image_path)
     if viewer_id and viewer_id != user.id and _is_visibility_hidden(user.id, viewer_id, "profile", db):
         # "Hide profile" rule now hides only DP for selected viewers.
         photo_url = None
@@ -1064,7 +1338,7 @@ def _build_notification_actor_out(user: User) -> NotificationActorOut:
         id=user.id,
         username=user.username,
         full_name=user.full_name,
-        profile_photo_url=f"/{image_path}" if image_path else None,
+        profile_photo_url=_public_media_url(image_path),
     )
 
 
@@ -1074,7 +1348,7 @@ def _build_comment_reaction_user_out(user: User) -> CommentReactionUserOut:
         id=user.id,
         username=user.username,
         full_name=user.full_name,
-        profile_photo_url=f"/{image_path}" if image_path else None,
+        profile_photo_url=_public_media_url(image_path),
     )
 
 
@@ -1139,7 +1413,10 @@ def _publish_notification_rows(rows: list[Notification]) -> None:
             "type": "notification",
             "notification": _build_notification_out(row).model_dump(mode="json"),
         }
+        _redis_publish(f"notifications:{row.recipient_id}", payload)
         notification_hub.publish(row.recipient_id, payload)
+    if rows:
+        _invalidate_notification_counts(*[row.recipient_id for row in rows])
 
 
 def _send_otp_email(
@@ -1332,7 +1609,7 @@ def _build_post_out(
         goal_title=post.goal_title,
         caption=post.caption,
         day_experience=post.day_experience,
-        screenshots=[f"/{image.image_path}" for image in post.screenshots],
+        screenshots=[_public_media_url(image.image_path) or "" for image in post.screenshots],
         like_count=len(post.likes),
         liked_by_me=liked_by_me,
         comment_count=len(post.comments),
@@ -1393,7 +1670,7 @@ def _build_story_out(story: Story, viewer_id: int | None = None) -> StoryOut:
         viewed = any(view.viewer_id == viewer_id for view in story.views)
     return StoryOut(
         id=story.id,
-        media_url=f"/{story.media_path}",
+        media_url=_public_media_url(story.media_path) or "",
         media_type=story.media_type,
         duration_seconds=story.duration_seconds,
         caption=story.caption,
@@ -2022,7 +2299,7 @@ def settings_account_dashboard(current_user: User = Depends(_require_user), db: 
                 "username": viewer.username,
                 "full_name": viewer.full_name,
                 "gender": viewer.gender or "prefer_not_to_say",
-                "profile_photo_url": f"/{viewer.profile_photo.image_path}" if viewer.profile_photo else None,
+                "profile_photo_url": _public_media_url(viewer.profile_photo.image_path) if viewer.profile_photo else None,
                 "last_viewed_at": row.created_at.isoformat(),
                 "view_count": count_by_viewer.get(viewer_id, 1),
             }
@@ -3093,6 +3370,14 @@ def send_chat_message(
         raise HTTPException(status_code=400, detail="Message cannot be empty")
     row = ChatMessage(sender_id=current_user.id, receiver_id=user_id, content=body)
     db.add(row)
+    db.flush()
+    db.execute(
+        text("UPDATE chat_messages SET conversation_id = :conversation_id WHERE id = :message_id"),
+        {
+            "conversation_id": f"{min(current_user.id, user_id)}:{max(current_user.id, user_id)}",
+            "message_id": row.id,
+        },
+    )
     created_notifications = _create_notifications(
         db=db,
         recipient_ids={user_id},
@@ -3208,6 +3493,14 @@ def list_notifications(
     db: Session = Depends(get_db),
 ):
     safe_limit = max(1, min(limit, 80))
+    if not unread_only and not after_id:
+        cached_count = _redis_get(_notification_count_key(current_user.id))
+        if cached_count is None:
+            unread_count = db.query(Notification).filter(
+                Notification.recipient_id == current_user.id,
+                Notification.is_read.is_(False),
+            ).count()
+            _redis_setex(_notification_count_key(current_user.id), 60, str(unread_count))
     query = (
         select(Notification)
         .where(Notification.recipient_id == current_user.id)
@@ -3247,6 +3540,7 @@ def mark_notification_read(
         raise HTTPException(status_code=404, detail="Notification not found")
     row.is_read = True
     db.commit()
+    _invalidate_notification_counts(current_user.id)
     return {"detail": "Notification marked as read"}
 
 
@@ -3265,6 +3559,7 @@ def mark_all_notifications_read(current_user: User = Depends(_require_user), db:
     for row in rows:
         row.is_read = True
     db.commit()
+    _invalidate_notification_counts(current_user.id)
     return {"detail": "All notifications marked as read", "updated": len(rows)}
 
 
@@ -3282,6 +3577,14 @@ async def notifications_websocket(websocket: WebSocket):
         return
 
     await notification_hub.connect(user.id, websocket)
+    pubsub = None
+    relay_task: asyncio.Task[Any] | None = None
+    client = _get_redis_client()
+    if client is not None:
+        with suppress(Exception):
+            pubsub = client.pubsub()
+            pubsub.subscribe(f"notifications:{user.id}")
+            relay_task = asyncio.create_task(_relay_notification_pubsub(websocket, pubsub))
     try:
         await websocket.send_json({"type": "ready"})
         while True:
@@ -3294,6 +3597,35 @@ async def notifications_websocket(websocket: WebSocket):
             await websocket.close()
         except Exception:
             pass
+    finally:
+        if relay_task:
+            relay_task.cancel()
+            with suppress(Exception):
+                await relay_task
+        if pubsub is not None:
+            with suppress(Exception):
+                pubsub.unsubscribe(f"notifications:{user.id}")
+            with suppress(Exception):
+                pubsub.close()
+
+
+async def _relay_notification_pubsub(websocket: WebSocket, pubsub: Any) -> None:
+    while True:
+        message = await asyncio.to_thread(pubsub.get_message, True, 1.0)
+        if not message or message.get("type") != "message":
+            await asyncio.sleep(0.1)
+            continue
+        data = message.get("data")
+        if not data:
+            continue
+        try:
+            payload = json.loads(data)
+        except Exception:
+            continue
+        try:
+            await websocket.send_json(payload)
+        except Exception:
+            return
 
 
 @app.get("/api/users", response_model=list[UserOut])
@@ -3342,6 +3674,7 @@ def follow_user(user_id: int, current_user: User = Depends(_require_user), db: S
         )
         db.commit()
         _publish_notification_rows(created_notifications)
+        _bump_feed_cache_version()
 
     refreshed = db.execute(select(User).options(joinedload(User.profile_photo)).where(User.id == user_id)).scalars().first()
     if not refreshed:
@@ -3371,6 +3704,7 @@ def unfollow_user(user_id: int, current_user: User = Depends(_require_user), db:
     if existing:
         db.delete(existing)
         db.commit()
+        _bump_feed_cache_version()
 
     refreshed = db.execute(select(User).options(joinedload(User.profile_photo)).where(User.id == user_id)).scalars().first()
     if not refreshed:
@@ -3635,6 +3969,7 @@ def create_post(
 
     db.commit()
     _publish_notification_rows(created_notifications)
+    _bump_feed_cache_version()
 
     created = (
         db.execute(
@@ -3672,6 +4007,7 @@ def delete_post(post_id: int, current_user: User = Depends(_require_user), db: S
 
     db.delete(post)
     db.commit()
+    _bump_feed_cache_version()
     return {"detail": "Post deleted"}
 
 
@@ -3964,6 +4300,37 @@ def _rank_posts_faiss_or_hybrid(
     if not np_mod.any(query_vec):
         return posts, f"{mode}_fallback_cold_start"
 
+    if _persisted_faiss_index is not None and _persisted_faiss_post_ids:
+        try:
+            persisted_dim = int(_persisted_faiss_index.d)
+        except Exception:
+            persisted_dim = dim
+        if persisted_dim == dim:
+            try:
+                search_k = min(len(_persisted_faiss_post_ids), max(len(posts), 1))
+                scores, ids = _persisted_faiss_index.search(query_vec.reshape(1, -1), search_k)
+                available = {post.id: post for post in posts}
+                ordered: list[Post] = []
+                score_by_post_id: dict[int, float] = {}
+                for rank_idx, idx in enumerate(ids[0]):
+                    pos = int(idx)
+                    if pos < 0 or pos >= len(_persisted_faiss_post_ids):
+                        continue
+                    post_id = _persisted_faiss_post_ids[pos]
+                    post = available.get(post_id)
+                    if not post:
+                        continue
+                    ordered.append(post)
+                    score_by_post_id[post.id] = float(scores[0][rank_idx])
+                if ordered:
+                    ordered_ids = {post.id for post in ordered}
+                    remaining = [post for post in posts if post.id not in ordered_ids]
+                    ordered.extend(remaining)
+                    if mode == "faiss":
+                        return ordered, "faiss_persisted"
+            except Exception:
+                pass
+
     index = faiss_mod.IndexFlatIP(dim)
     index.add(vectors)
     scores, ids = index.search(query_vec.reshape(1, -1), len(posts))
@@ -3997,6 +4364,10 @@ def _rank_posts_faiss_or_hybrid(
 
 @app.get("/api/feed", response_model=FeedOut)
 def global_feed(current_user: User = Depends(_require_user), db: Session = Depends(get_db)):
+    cached_payload = _redis_get(_feed_cache_key(current_user.id))
+    if cached_payload:
+        with suppress(Exception):
+            return FeedOut.model_validate_json(cached_payload)
     started_at = time.perf_counter()
     now = datetime.utcnow()
     feed_state = (
@@ -4094,12 +4465,14 @@ def global_feed(current_user: User = Depends(_require_user), db: Session = Depen
     db.commit()
 
     elapsed_ms = int((time.perf_counter() - started_at) * 1000)
-    return FeedOut(
+    response = FeedOut(
         posts=[_build_post_out(post, db, current_user.id) for post in posts],
         suggested_users=suggested_users,
         ranking_mode=ranked_mode,
         ranking_latency_ms=elapsed_ms,
     )
+    _redis_setex(_feed_cache_key(current_user.id), FEED_CACHE_TTL_SECONDS, response.model_dump_json())
+    return response
 
 
 @app.get("/api/posts/{post_id}/preview")
@@ -4126,8 +4499,8 @@ def post_preview(post_id: int, current_user: User = Depends(_require_user), db: 
         "caption": post.caption,
         "author_id": post.author.id,
         "author_username": post.author.username,
-        "author_photo_url": f"/{post.author.profile_photo.image_path}" if post.author.profile_photo else None,
-        "media_url": f"/{first_media}" if first_media else "",
+        "author_photo_url": _public_media_url(post.author.profile_photo.image_path) if post.author.profile_photo else None,
+        "media_url": _public_media_url(first_media) or "",
         "media_type": "video" if _is_video_path(first_media) else ("image" if first_media else "none"),
         "post_url": f"/post/{post.id}",
     }
@@ -4155,8 +4528,8 @@ def story_preview(story_id: int, current_user: User = Depends(_require_user), db
         "caption": story.caption,
         "author_id": story.author.id,
         "author_username": story.author.username,
-        "author_photo_url": f"/{story.author.profile_photo.image_path}" if story.author.profile_photo else None,
-        "media_url": f"/{story.media_path}" if story.media_path else "",
+        "author_photo_url": _public_media_url(story.author.profile_photo.image_path) if story.author.profile_photo else None,
+        "media_url": _public_media_url(story.media_path) or "",
         "media_type": story.media_type or ("video" if _is_video_path(story.media_path) else "image"),
         "story_url": f"/community-feed?story_user_id={story.author.id}",
         "created_at": story.created_at.isoformat(),
@@ -4182,6 +4555,7 @@ def create_story(
     if ext in ALLOWED_IMAGE_EXT:
         sticker_data_clean = _sanitize_sticker_data(sticker_data)
         _, path = _save_upload_file(story_media, ALLOWED_IMAGE_EXT)
+        path = _persist_local_media_path(path, folder="stories")
         story = Story(
             author_id=current_user.id,
             media_path=path,
@@ -4201,6 +4575,7 @@ def create_story(
         )
         db.commit()
         _publish_notification_rows(created_notifications)
+        _bump_feed_cache_version()
         db.refresh(story)
         return _build_story_out(story, current_user.id)
 
@@ -4211,9 +4586,10 @@ def create_story(
         duration = _ffprobe_duration_seconds(original_abs)
 
         if duration <= 60:
+            persisted_path = _persist_local_media_path(original_path, folder="stories")
             row = Story(
                 author_id=current_user.id,
-                media_path=original_path,
+                media_path=persisted_path,
                 media_type="video",
                 duration_seconds=duration,
                 caption=caption.strip(),
@@ -4228,11 +4604,12 @@ def create_story(
                 pass
             for index, chunk_path in enumerate(chunk_paths, start=1):
                 chunk_dur = _ffprobe_duration_seconds(Path(chunk_path))
+                persisted_chunk_path = _persist_local_media_path(chunk_path, folder="stories")
                 part_caption = f"{caption.strip()} (Part {index})".strip()
                 db.add(
                     Story(
                         author_id=current_user.id,
-                        media_path=chunk_path,
+                        media_path=persisted_chunk_path,
                         media_type="video",
                         duration_seconds=min(60, chunk_dur),
                         caption=part_caption,
@@ -4249,6 +4626,7 @@ def create_story(
         )
         db.commit()
         _publish_notification_rows(created_notifications)
+        _bump_feed_cache_version()
         newest = (
             db.execute(select(Story).where(Story.author_id == current_user.id).order_by(desc(Story.id)).limit(1))
             .scalars()
@@ -4552,6 +4930,8 @@ def like_post(post_id: int, current_user: User = Depends(_require_user), db: Ses
         )
         db.commit()
         _publish_notification_rows(created_notifications)
+    if created_like:
+        _bump_feed_cache_version()
     count = db.query(PostLike).filter(PostLike.post_id == post_id).count()
     return {"like_count": count}
 
@@ -4574,6 +4954,7 @@ def unlike_post(post_id: int, current_user: User = Depends(_require_user), db: S
     if like:
         db.delete(like)
         db.commit()
+        _bump_feed_cache_version()
     count = db.query(PostLike).filter(PostLike.post_id == post_id).count()
     return {"like_count": count}
 
@@ -4697,6 +5078,7 @@ def add_comment(
     if created_notifications:
         db.commit()
         _publish_notification_rows(created_notifications)
+    _bump_feed_cache_version()
 
     return CommentOut(
         id=comment.id,

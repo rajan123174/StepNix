@@ -1,0 +1,16 @@
+[Unit]
+Description=Personal Blog FastAPI Backend
+After=network.target
+
+[Service]
+User=ubuntu
+Group=www-data
+WorkingDirectory=/home/ubuntu/personalBlog
+EnvironmentFile=/home/ubuntu/personalBlog/.env
+ExecStart=/home/ubuntu/personalBlog/.venv/bin/gunicorn -c config/gunicorn.conf.py main:app
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

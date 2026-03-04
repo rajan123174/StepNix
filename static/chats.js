@@ -322,7 +322,8 @@ async function chatApi(path, options = {}) {
   const token = App.getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(path, { ...options, headers });
+  const target = window.App?.resolveApiUrl ? window.App.resolveApiUrl(path) : path;
+  const response = await fetch(target, { ...options, headers });
   if (!response.ok) {
     const error = await response
       .json()

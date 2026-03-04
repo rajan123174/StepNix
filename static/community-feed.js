@@ -40,7 +40,8 @@ function storyReplyChatHeaders() {
 async function storyReplyChatApi(path, options = {}) {
   const headers = new Headers(options.headers || {});
   storyReplyChatHeaders().forEach((value, key) => headers.set(key, value));
-  const response = await fetch(path, { ...options, headers });
+  const target = window.App?.resolveApiUrl ? window.App.resolveApiUrl(path) : path;
+  const response = await fetch(target, { ...options, headers });
   if (!response.ok) {
     const error = await response
       .json()
