@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Create Story</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css?v=130" />
+  </head>
+  <body>
+    <nav class="site-nav">
+      <a href="/create-profile">Account</a>
+      <a href="/new-progress">New Daily Progress</a>
+      <a class="active" href="/stories">Stories</a>
+      <a href="/community-feed">Community Feed</a>
+      <a href="/chats">Chats</a>
+      <a href="/profile">My Profile</a>
+      <a href="/help-center">Help Center</a>
+      <a href="/settings">Settings</a>
+      <a id="profile-logout-link" href="#">Logout</a>
+    </nav>
+
+    <section class="page-head">
+      <h1>Create Story</h1>
+      <p>Build premium stories with image/video, draggable stickers, and post them as a sequence.</p>
+    </section>
+
+    <main>
+      <section class="panel story-compose-panel">
+        <form id="story-form" class="story-compose-form" enctype="multipart/form-data">
+          <input id="story-media" class="hidden" type="file" accept="image/*,video/*" multiple />
+
+          <div class="story-phone-shell">
+            <div id="story-preview-surface" class="story-preview-surface">
+              <div class="story-top-tools">
+                <div class="story-more-wrap">
+                  <button id="story-more-btn" class="story-more-btn hidden" type="button" aria-label="Story options">⋯</button>
+                  <div id="story-more-menu" class="story-more-menu hidden">
+                    <button id="story-add-menu-btn" type="button">+ Add More</button>
+                    <button id="story-remove-menu-btn" type="button">Remove Selected</button>
+                  </div>
+                </div>
+                <small id="story-item-counter" class="story-item-counter"></small>
+              </div>
+
+              <div id="story-preview-media" class="story-preview-media"></div>
+              <div id="story-preview-overlay" class="story-preview-overlay hidden"></div>
+              <div id="story-empty-state" class="story-empty-state">
+                <button id="story-add-btn" class="story-add-btn" type="button" aria-label="Add story media">+</button>
+                <button class="story-post-btn story-post-btn-empty" type="submit" disabled>Post Story</button>
+                <small>Add image/video to start your story.</small>
+              </div>
+
+              <div id="story-editor" class="story-editor hidden">
+                <div class="story-editor-tabs">
+                  <button class="story-tab-btn is-active" type="button" data-tab="caption">Caption</button>
+                  <button class="story-tab-btn" type="button" data-tab="sticker">Sticker</button>
+                </div>
+
+                <div id="story-panel-caption" class="story-editor-panel">
+                  <textarea id="story-caption" placeholder="Write caption..."></textarea>
+                </div>
+                <div id="story-panel-sticker" class="story-editor-panel hidden">
+                  <div id="story-sticker-palette" class="story-sticker-palette"></div>
+                  <div class="story-sticker-actions">
+                    <button id="story-remove-sticker-btn" type="button">Remove Selected</button>
+                    <button id="story-clear-stickers-btn" type="button">Clear All</button>
+                  </div>
+                </div>
+
+                <div id="story-queue" class="story-queue-inline"></div>
+                <button id="story-post-btn" class="story-post-btn" type="submit" disabled>Post Story</button>
+              </div>
+            </div>
+          </div>
+        </form>
+        <p class="notice" id="story-status"></p>
+      </section>
+    </main>
+
+    <script src="/static/common.js?v=33"></script>
+    <script src="/static/stories.js?v=7"></script>
+  </body>
+</html>

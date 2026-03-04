@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>User Profile</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css?v=132" />
+  </head>
+  <body>
+    <nav class="site-nav">
+      <a href="/create-profile">Account</a>
+      <a href="/new-progress">New Daily Progress</a>
+      <a href="/stories">Stories</a>
+      <a href="/community-feed">Community Feed</a>
+      <a href="/chats">Chats</a>
+      <a href="/profile">My Profile</a>
+      <a href="/help-center">Help Center</a>
+      <a href="/settings">Settings</a>
+      <a id="profile-logout-link" href="#">Logout</a>
+    </nav>
+
+    <section class="page-head">
+      <h1 id="public-profile-title">User Profile</h1>
+      <p>View this user's profile and posts.</p>
+    </section>
+
+    <main>
+      <section class="panel">
+        <div class="profile-head">
+          <img id="public-profile-avatar" class="avatar clickable" src="/static/default-avatar.svg" alt="profile" />
+          <div>
+            <h2 id="public-profile-name"></h2>
+            <p id="public-profile-username" class="notice"></p>
+            <div class="profile-stats">
+              <span><strong id="public-post-count">0</strong> posts</span>
+              <button id="public-followers-stat-btn" class="stat-link" type="button"><strong id="public-follower-count">0</strong> followers</button>
+              <button id="public-following-stat-btn" class="stat-link" type="button"><strong id="public-following-count">0</strong> following</button>
+            </div>
+            <p id="public-profile-bio"></p>
+            <div class="public-profile-actions">
+              <button id="public-follow-btn" class="follow-btn hidden" type="button">Follow</button>
+              <button id="public-message-btn" class="profile-message-btn hidden" type="button" aria-label="Message user" title="Message">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 5.5h16a1.5 1.5 0 0 1 1.5 1.5v10A1.5 1.5 0 0 1 20 18.5H9l-5 3v-4H4A1.5 1.5 0 0 1 2.5 17V7A1.5 1.5 0 0 1 4 5.5Z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>Posts</h3>
+        <div id="public-profile-feed" class="stack"></div>
+      </section>
+    </main>
+
+    <div id="public-dp-modal" class="dp-modal hidden">
+      <div class="dp-modal-backdrop"></div>
+      <div class="dp-modal-content">
+        <button id="public-dp-modal-close" class="dp-modal-close-x" type="button" aria-label="Close">✕</button>
+        <img id="public-dp-modal-image" src="/static/default-avatar.svg" alt="Profile Photo" />
+      </div>
+    </div>
+
+    <div id="public-follow-list-modal" class="follow-list-modal hidden">
+      <div class="follow-list-backdrop"></div>
+      <div class="follow-list-content">
+        <div class="follow-list-head">
+          <h3 id="public-follow-list-title">Followers</h3>
+          <button id="public-follow-list-close" class="follow-list-close-x" type="button" aria-label="Close">✕</button>
+        </div>
+        <input
+          id="public-follow-list-search"
+          class="follow-list-search"
+          type="text"
+          placeholder="Search in this list..."
+          autocomplete="off"
+        />
+        <div id="public-follow-list" class="user-results"></div>
+      </div>
+    </div>
+
+    <script src="/static/common.js?v=34"></script>
+    <script src="/static/feed-cards.js?v=38"></script>
+    <script src="/static/user-profile.js?v=11"></script>
+  </body>
+</html>

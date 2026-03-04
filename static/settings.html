@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Settings</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css?v=132" />
+  </head>
+  <body>
+    <nav class="site-nav">
+      <a href="/create-profile">Account</a>
+      <a href="/new-progress">New Daily Progress</a>
+      <a href="/stories">Stories</a>
+      <a href="/community-feed">Community Feed</a>
+      <a href="/chats">Chats</a>
+      <a href="/profile">My Profile</a>
+      <a href="/help-center">Help Center</a>
+      <a class="active" href="/settings">Settings</a>
+      <a id="profile-logout-link" href="#">Logout</a>
+    </nav>
+
+    <section class="page-head">
+      <h1>Settings</h1>
+      <p>Manage your account theme, privacy, and security controls.</p>
+    </section>
+
+    <main>
+      <section class="panel settings-shell">
+        <aside class="settings-menu">
+          <h3>Settings</h3>
+          <button type="button" class="settings-menu-btn is-active" data-settings-target="settings-panel-account">
+            Account settings
+          </button>
+          <button type="button" class="settings-menu-btn" data-settings-target="settings-panel-dashboard">
+            Account dashboard
+          </button>
+          <button type="button" class="settings-menu-btn" data-settings-target="settings-panel-security">
+            Security & Privacy
+          </button>
+          <button type="button" class="settings-menu-btn" data-settings-target="settings-panel-theme">
+            Theme
+          </button>
+        </aside>
+
+        <div class="settings-content">
+          <section id="settings-panel-account" class="settings-pane is-active">
+            <h3>Account settings</h3>
+            <p class="notice">Edit your public profile details and account lifecycle controls.</p>
+            <div class="settings-card">
+              <h4>Edit profile</h4>
+              <p class="notice">Update profile photo, username, full name, gender, and bio.</p>
+              <form id="settings-edit-profile-form" class="settings-edit-profile-form">
+                <div class="settings-edit-profile-head">
+                  <div class="avatar-wrap settings-avatar-wrap">
+                    <img id="settings-profile-avatar" class="avatar settings-avatar" src="/static/default-avatar.svg" alt="Profile photo" />
+                    <button id="settings-avatar-edit-btn" class="avatar-edit" type="button" aria-label="Update profile photo">✎</button>
+                    <input id="settings-profile-photo-input" type="file" accept="image/*" class="hidden" />
+                  </div>
+                  <div class="settings-edit-profile-meta">
+                    <p class="notice">Click the pencil icon to change your display picture.</p>
+                    <p id="settings-edit-profile-status" class="notice"></p>
+                  </div>
+                </div>
+
+                <label for="settings-username-input">Username</label>
+                <input id="settings-username-input" maxlength="40" placeholder="username" required />
+
+                <label for="settings-fullname-input">Full name</label>
+                <input id="settings-fullname-input" maxlength="120" placeholder="Full name" required />
+
+                <label for="settings-gender-input">Gender</label>
+                <select id="settings-gender-input" required>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="prefer_not_to_say">Prefer not to say</option>
+                </select>
+
+                <label for="settings-bio-input">Bio</label>
+                <textarea id="settings-bio-input" maxlength="250" rows="4" placeholder="Write your bio..."></textarea>
+
+                <button id="settings-edit-profile-save-btn" type="submit" class="settings-action-btn">Save profile changes</button>
+              </form>
+            </div>
+            <div class="settings-card">
+              <h4>Delete account</h4>
+              <p class="notice">Deleting account is permanent and removes your profile, posts, comments, likes, stories, and chats.</p>
+              <button id="open-delete-account-modal" type="button" class="settings-action-btn">Delete Account</button>
+            </div>
+          </section>
+
+          <section id="settings-panel-security" class="settings-pane hidden">
+            <h3>Security and privacy</h3>
+            <p class="notice">Control story/profile visibility, message seen privacy, block list, password, and email updates.</p>
+
+            <div class="settings-card">
+              <h4>Message seen privacy</h4>
+              <label class="security-toggle-row" for="security-message-seen-toggle">
+                <input id="security-message-seen-toggle" type="checkbox" checked />
+                <span>Allow others to see message seen status</span>
+              </label>
+              <p id="security-message-seen-status" class="notice"></p>
+            </div>
+
+            <div class="settings-card">
+              <h4>Hide story from</h4>
+              <p class="notice">Select followers/following who should not see your stories.</p>
+              <input id="security-story-search" placeholder="Search followers/following..." />
+              <div id="security-story-list" class="security-user-list"></div>
+              <button id="security-story-save-btn" type="button" class="settings-action-btn">Save story visibility</button>
+              <p id="security-story-status" class="notice"></p>
+            </div>
+
+            <div class="settings-card">
+              <h4>Hide profile photo from</h4>
+              <p class="notice">Select followers/following who should not see your profile picture.</p>
+              <input id="security-profile-search" placeholder="Search followers/following..." />
+              <div id="security-profile-list" class="security-user-list"></div>
+              <button id="security-profile-save-btn" type="button" class="settings-action-btn">Save profile visibility</button>
+              <p id="security-profile-status" class="notice"></p>
+            </div>
+
+            <div class="settings-card">
+              <h4>Block users</h4>
+              <p class="notice">Blocked users cannot message you or view your profile.</p>
+              <input id="security-block-search" placeholder="Search followers/following..." />
+              <div id="security-block-list" class="security-user-list"></div>
+            </div>
+
+            <div class="settings-card">
+              <h4>Change password</h4>
+              <div class="security-flow-grid">
+                <button id="security-password-send-otp-btn" type="button" class="settings-action-btn">Send OTP</button>
+                <input id="security-password-otp-input" maxlength="6" inputmode="numeric" placeholder="Enter OTP" />
+                <input id="security-password-new-input" type="password" placeholder="New password" />
+                <input id="security-password-confirm-input" type="password" placeholder="Confirm new password" />
+                <button id="security-password-continue-btn" type="button" class="settings-action-btn">Continue</button>
+              </div>
+              <p id="security-password-status" class="notice"></p>
+            </div>
+
+            <div class="settings-card">
+              <h4>Update email</h4>
+              <div class="security-flow-grid">
+                <button id="security-email-send-otp-btn" type="button" class="settings-action-btn">Send OTP</button>
+                <input id="security-email-otp-input" maxlength="6" inputmode="numeric" placeholder="Enter OTP" />
+                <input id="security-email-new-input" type="email" placeholder="New email" />
+                <input id="security-email-confirm-input" type="email" placeholder="Confirm new email" />
+                <button id="security-email-continue-btn" type="button" class="settings-action-btn">Continue</button>
+              </div>
+              <p id="security-email-status" class="notice"></p>
+            </div>
+          </section>
+
+          <section id="settings-panel-dashboard" class="settings-pane hidden">
+            <h3>Account dashboard</h3>
+            <p class="notice">Reach summary and profile audience insights.</p>
+            <div id="account-dashboard-status" class="notice">Loading dashboard...</div>
+            <div class="dashboard-metrics">
+              <article class="dashboard-metric-card">
+                <h4>Total profile views</h4>
+                <p id="dashboard-total-views">0</p>
+              </article>
+              <article class="dashboard-metric-card">
+                <h4>Views (last 30 days)</h4>
+                <p id="dashboard-views-30d">0</p>
+              </article>
+              <article class="dashboard-metric-card">
+                <h4>Unique viewers</h4>
+                <p id="dashboard-unique-viewers">0</p>
+              </article>
+            </div>
+            <div class="settings-card">
+              <h4>Gender ratio matrix</h4>
+              <div id="dashboard-gender-matrix" class="dashboard-gender-matrix"></div>
+            </div>
+            <div class="settings-card">
+              <h4>Who viewed your profile</h4>
+              <div id="dashboard-viewers-list" class="dashboard-viewers-list"></div>
+            </div>
+          </section>
+
+          <section id="settings-panel-theme" class="settings-pane hidden">
+            <h3>Theme</h3>
+            <p class="notice">Choose how your website looks.</p>
+            <div class="settings-card">
+              <h4>Color mode</h4>
+              <div class="theme-mode-row">
+                <button id="theme-light-btn" type="button" class="settings-action-btn">Light mode</button>
+                <button id="theme-dark-btn" type="button" class="settings-action-btn">Dark mode</button>
+              </div>
+              <p id="theme-mode-status" class="notice"></p>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <div id="delete-account-modal" class="delete-account-modal hidden">
+      <div class="delete-account-backdrop"></div>
+      <section class="delete-account-content">
+        <header class="delete-account-head">
+          <h3>Delete Account</h3>
+          <button id="delete-account-close" type="button" class="follow-list-close-x" aria-label="Close">✕</button>
+        </header>
+        <p id="delete-account-status" class="notice">OTP will be sent to your registered email.</p>
+
+        <form id="delete-account-initial-form" class="grid-form">
+          <input id="delete-account-initial-otp" maxlength="6" inputmode="numeric" placeholder="Enter first OTP" required />
+          <textarea id="delete-account-reason" placeholder="Reason for deleting account (required)" required></textarea>
+          <button id="delete-account-continue" type="submit">Continue</button>
+        </form>
+
+        <div id="delete-account-confirm-step" class="grid-form hidden">
+          <input id="delete-account-confirm-otp" maxlength="6" inputmode="numeric" placeholder="Enter reconfirmation OTP" />
+          <p class="notice">We sent a second OTP for final reconfirmation. It auto-verifies when you enter 6 digits.</p>
+          <button id="delete-account-final-btn" type="button" class="danger-text-btn hidden">Delete account permanently</button>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/common.js?v=32"></script>
+    <script src="/static/settings.js?v=6"></script>
+  </body>
+</html>

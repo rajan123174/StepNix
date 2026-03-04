@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Help Center</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css?v=133" />
+  </head>
+  <body>
+    <nav class="site-nav">
+      <a href="/create-profile">Account</a>
+      <a href="/new-progress">New Daily Progress</a>
+      <a href="/stories">Stories</a>
+      <a href="/community-feed">Community Feed</a>
+      <a href="/chats">Chats</a>
+      <a href="/profile">My Profile</a>
+      <a class="active" href="/help-center">Help Center</a>
+      <a href="/settings">Settings</a>
+      <a id="profile-logout-link" href="#">Logout</a>
+    </nav>
+
+    <section class="page-head">
+      <h1>Help Center</h1>
+      <p>Send bug reports, feedback, questions, and product ideas directly to the StepNix support inbox.</p>
+    </section>
+
+    <main>
+      <section class="panel help-center-grid">
+        <aside class="help-center-menu">
+          <h3>Options</h3>
+          <button class="help-topic-btn is-active" type="button" data-help-topic="bug">Report a bug</button>
+          <button class="help-topic-btn" type="button" data-help-topic="feedback">Feedback</button>
+          <button class="help-topic-btn" type="button" data-help-topic="question">Ask a question</button>
+          <button class="help-topic-btn" type="button" data-help-topic="idea">Give an idea to improve</button>
+        </aside>
+
+        <div class="help-center-content">
+          <h3 id="help-topic-title">Report a bug</h3>
+          <p id="help-topic-hint" class="notice">Describe the issue clearly with steps to reproduce.</p>
+          <form id="help-center-form" class="help-center-form">
+            <textarea
+              id="help-message-input"
+              maxlength="4000"
+              placeholder="Write your message..."
+              required
+            ></textarea>
+            <button id="help-submit-btn" type="submit">Send message</button>
+          </form>
+          <p id="help-status" class="notice"></p>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/common.js?v=32"></script>
+    <script src="/static/help-center.js?v=1"></script>
+  </body>
+</html>

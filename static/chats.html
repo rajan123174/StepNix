@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chats</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css?v=135" />
+  </head>
+  <body>
+    <nav class="site-nav">
+      <a href="/create-profile">Account</a>
+      <a href="/new-progress">New Daily Progress</a>
+      <a href="/stories">Stories</a>
+      <a href="/community-feed">Community Feed</a>
+      <a class="active" href="/chats">Chats</a>
+      <a href="/profile">My Profile</a>
+      <a href="/help-center">Help Center</a>
+      <a href="/settings">Settings</a>
+      <a id="profile-logout-link" href="#">Logout</a>
+    </nav>
+
+    <section class="page-head">
+      <h1>Chats</h1>
+      <p>Secure messaging with email OTP + secret-code verification and one-device active chat session.</p>
+    </section>
+
+    <main>
+      <section id="chat-auth-gate" class="panel chat-auth-gate">
+        <h3>Enable Messaging</h3>
+        <p class="notice">Enter your registered email to receive a 6-digit OTP and 8-character secret code.</p>
+        <form id="chat-send-otp-form" class="grid-form chat-email-form">
+          <input id="chat-email-input" type="email" placeholder="Registered email" />
+          <button class="alt chat-continue-btn" type="submit">Continue</button>
+        </form>
+        <form id="chat-verify-otp-form" class="grid-form hidden">
+          <input id="chat-otp-input" placeholder="Enter 6 digit OTP" maxlength="6" inputmode="numeric" />
+          <input id="chat-secret-input" placeholder="Enter 8 character secret code" maxlength="8" />
+          <div class="chat-otp-actions">
+            <button id="chat-verify-btn" type="submit">Verify</button>
+            <button id="chat-resend-btn" class="alt" type="button" disabled>Resend OTP in 30s</button>
+          </div>
+        </form>
+        <p id="chat-auth-status" class="notice"></p>
+      </section>
+
+      <section id="chat-app" class="panel chat-app hidden">
+        <div class="chat-active-strip">
+          <h4>Active users</h4>
+          <div id="chat-active-users" class="chat-active-users"></div>
+        </div>
+        <div class="chat-layout">
+          <aside class="chat-sidebar">
+            <div class="chat-sidebar-top">
+              <h3>Conversations</h3>
+              <div class="chat-search-wrap">
+                <span class="chat-search-icon" aria-hidden="true">⌕</span>
+                <input id="chat-user-search" type="search" placeholder="Search users..." />
+              </div>
+              <div id="chat-user-results" class="chat-user-results hidden"></div>
+            </div>
+            <div id="chat-conversations" class="chat-conversations"></div>
+          </aside>
+          <section class="chat-thread">
+            <header id="chat-thread-head" class="chat-thread-head">Select a user to start chatting</header>
+            <div id="chat-messages" class="chat-messages"></div>
+            <form id="chat-send-form" class="chat-send-form">
+              <textarea id="chat-message-input" rows="1" placeholder="Type a message..."></textarea>
+              <button type="submit" class="chat-send-icon-btn" aria-label="Send message" title="Send">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    d="M3 11.5L21 3l-8.5 18-2.4-6.1L3 11.5z"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M10.1 14.9L21 3"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </form>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <div id="chat-delete-modal" class="chat-delete-modal hidden">
+      <div class="chat-delete-card">
+        <button id="chat-delete-trigger" type="button" class="chat-delete-trigger">Delete message</button>
+        <div id="chat-delete-options" class="chat-delete-options hidden">
+          <button id="chat-delete-me-btn" type="button" class="chat-delete-option">Delete for me</button>
+          <button id="chat-delete-everyone-btn" type="button" class="chat-delete-option">
+            Delete for everyone
+          </button>
+        </div>
+        <button id="chat-delete-cancel" type="button" class="chat-delete-cancel">Cancel</button>
+      </div>
+    </div>
+
+    <script src="/static/common.js?v=34"></script>
+    <script src="/static/chats.js?v=26"></script>
+  </body>
+</html>

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Community Feed</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css?v=133" />
+  </head>
+  <body>
+    <nav class="site-nav">
+      <a href="/create-profile">Account</a>
+      <a href="/new-progress">New Daily Progress</a>
+      <a href="/stories">Stories</a>
+      <a class="active" href="/community-feed">Community Feed</a>
+      <a href="/chats">Chats</a>
+      <a href="/profile">My Profile</a>
+      <a href="/help-center">Help Center</a>
+      <a href="/settings">Settings</a>
+      <a id="profile-logout-link" href="#">Logout</a>
+    </nav>
+
+    <section class="page-head">
+      <div class="search-wrap">
+        <span class="search-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="M20 20l-4.2-4.2"></path>
+          </svg>
+        </span>
+        <input id="feed-search" type="search" placeholder="Search by username or name" />
+        <div id="user-results-box" class="user-results-box hidden">
+          <p class="notice" id="user-status"></p>
+          <div id="user-results" class="user-results"></div>
+        </div>
+      </div>
+    </section>
+
+    <main>
+      <section class="panel story-section">
+        <p class="notice">Stories</p>
+        <section class="story-panel standalone">
+          <div id="story-bar" class="story-bar"></div>
+        </section>
+      </section>
+
+      <section class="panel">
+        <h1>Community Feed</h1>
+        <p>Browse all posts and interact as your logged-in account.</p>
+        <p class="notice" id="whoami"></p>
+        <p class="notice" id="search-status"></p>
+        <div id="feed" class="stack"></div>
+      </section>
+    </main>
+
+    <script src="/static/common.js?v=34"></script>
+    <script src="/static/feed-cards.js?v=38"></script>
+    <script src="/static/community-feed.js?v=36"></script>
+  </body>
+</html>

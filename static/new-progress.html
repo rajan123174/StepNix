@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>New Daily Progress</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css?v=133" />
+  </head>
+  <body>
+    <nav class="site-nav">
+      <a href="/create-profile">Account</a>
+      <a class="active" href="/new-progress">New Daily Progress</a>
+      <a href="/stories">Stories</a>
+      <a href="/community-feed">Community Feed</a>
+      <a href="/chats">Chats</a>
+      <a href="/profile">My Profile</a>
+      <a href="/help-center">Help Center</a>
+      <a href="/settings">Settings</a>
+      <a id="profile-logout-link" href="#">Logout</a>
+    </nav>
+
+    <section class="page-head">
+      <h1>New Daily Progress</h1>
+      <p>Create a progress post as your logged-in account.</p>
+    </section>
+
+    <main>
+      <section class="panel">
+        <form id="post-form" class="grid-form" enctype="multipart/form-data">
+          <input id="goal-title" placeholder="Goal title" required />
+          <textarea id="caption" placeholder="Write today's progress caption"></textarea>
+          <textarea id="day-experience" placeholder="What did you learn today? Share your thoughts and experience."></textarea>
+          <input id="screenshots" type="file" accept="image/*,video/mp4,video/quicktime,video/webm,video/x-m4v" multiple />
+          <div id="selected-media-list" class="selected-media-list"></div>
+          <button type="submit">Publish</button>
+        </form>
+        <p class="notice" id="status"></p>
+      </section>
+    </main>
+
+    <script src="/static/common.js?v=32"></script>
+    <script src="/static/new-progress.js?v=7"></script>
+  </body>
+</html>

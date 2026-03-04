@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Account</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css?v=133" />
+  </head>
+  <body class="account-page">
+    <nav class="site-nav">
+      <a class="active" href="/create-profile">Account</a>
+      <a href="/new-progress">New Daily Progress</a>
+      <a href="/stories">Stories</a>
+      <a href="/community-feed">Community Feed</a>
+      <a href="/chats">Chats</a>
+      <a href="/profile">My Profile</a>
+      <a href="/help-center">Help Center</a>
+      <a href="/settings">Settings</a>
+      <a id="profile-logout-link" href="#">Logout</a>
+    </nav>
+
+    <section class="page-head">
+      <h1>Account</h1>
+      <p>Register or login. After login, all actions are linked to your account automatically.</p>
+    </section>
+
+    <main>
+      <section class="panel account-card">
+        <div class="switcher">
+          <button id="show-register" type="button">Register</button>
+          <button id="show-login" type="button">Login</button>
+        </div>
+
+        <div id="register-box" class="hidden">
+          <h3>Register</h3>
+          <form id="register-form" class="grid-form" enctype="multipart/form-data">
+            <input id="r-username" placeholder="Username" required />
+            <input id="r-email" type="email" placeholder="Email" required />
+            <div class="register-otp-row">
+              <input id="r-email-otp" placeholder="Enter 6 digit verification code" maxlength="6" inputmode="numeric" required />
+              <button id="send-register-otp-btn" type="button" class="alt">Send Code</button>
+            </div>
+            <select id="r-gender" required>
+              <option value="" disabled selected>Select gender</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="prefer_not_to_say">Prefer not to say</option>
+            </select>
+            <input id="r-full-name" placeholder="Full name" required />
+            <textarea id="r-bio" placeholder="Bio"></textarea>
+            <input id="r-password" type="password" placeholder="Password (min 6 chars)" required />
+            <button type="submit">Create Account</button>
+          </form>
+          <p class="notice" id="register-otp-status"></p>
+        </div>
+
+        <div id="login-box">
+          <h3>Login</h3>
+          <form id="login-form" class="grid-form">
+            <input id="l-identifier" placeholder="Username or email" required />
+            <input id="l-password" type="password" placeholder="Password" required />
+            <button type="submit">Login</button>
+          </form>
+          <div class="center-row">
+            <button id="forgot-toggle" type="button" class="forgot-link">Forgot Password?</button>
+          </div>
+
+          <div id="forgot-box" class="panel hidden">
+            <h4>Recover Account</h4>
+
+            <form id="forgot-email-form" class="grid-form">
+              <input id="fp-email" type="email" placeholder="Enter your registered email" required />
+              <button id="send-otp-btn" type="submit" disabled>Send OTP</button>
+            </form>
+
+            <form id="forgot-otp-form" class="grid-form hidden">
+              <input id="fp-otp" placeholder="Enter 6 digit OTP" required maxlength="6" inputmode="numeric" autocomplete="one-time-code" />
+              <button id="resend-otp-btn" type="button" class="alt" disabled>Resend OTP in 30s</button>
+            </form>
+
+            <form id="forgot-reset-form" class="grid-form hidden">
+              <input id="fp-new-password" type="password" placeholder="Set new password" required disabled />
+              <button id="fp-reset-btn" type="submit" disabled>Reset Password</button>
+            </form>
+          </div>
+        </div>
+        <p class="notice" id="auth-status"></p>
+      </section>
+    </main>
+
+    <script src="/static/common.js?v=34"></script>
+    <script src="/static/create-profile.js?v=10"></script>
+  </body>
+</html>
