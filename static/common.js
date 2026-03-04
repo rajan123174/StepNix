@@ -29,8 +29,10 @@ function getAuthUser() {
 const THEME_STORAGE_KEY = "siteTheme";
 
 function getTheme() {
-  const value = (localStorage.getItem(THEME_STORAGE_KEY) || "light").trim().toLowerCase();
-  return value === "dark" ? "dark" : "light";
+  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  if (!stored) return "dark";
+  const value = stored.trim().toLowerCase();
+  return value === "light" ? "light" : "dark";
 }
 
 function setTheme(theme) {
@@ -285,12 +287,13 @@ function initSidebarCollapse() {
     brand.setAttribute("aria-label", "StepNix home");
     brand.innerHTML = `
       <img src="/static/stepnix-logo.svg?v=3" alt="StepNix logo" />
-      <span>StepNix</span>
+      <span class="app-top-brand-user" hidden></span>
     `;
     document.body.appendChild(brand);
   }
 
   const links = Array.from(nav.querySelectorAll("a[href]"));
+  const brandUserLabel = document.querySelector(".app-top-brand-user");
   let myProfileImg = null;
   const mobilePrimaryHrefs = new Set(["/community-feed", "/chats", "/stories", "/profile"]);
   const mobileSecondaryLinks = [];
@@ -299,6 +302,19 @@ function initSidebarCollapse() {
     if (!(myProfileImg instanceof HTMLImageElement)) return;
     const user = getAuthUser();
     myProfileImg.src = (user && user.profile_photo_url) || "/static/default-avatar.svg";
+  };
+
+  const refreshBrandIdentity = () => {
+    if (!(brandUserLabel instanceof HTMLElement)) return;
+    const user = getAuthUser();
+    const username = user && typeof user.username === "string" ? user.username.trim() : "";
+    if (!username) {
+      brandUserLabel.textContent = "";
+      brandUserLabel.hidden = true;
+      return;
+    }
+    brandUserLabel.textContent = `@${username}`;
+    brandUserLabel.hidden = false;
   };
 
   links.forEach((link) => {
@@ -449,7 +465,9 @@ function initSidebarCollapse() {
   // Hover-to-expand sidebar: collapsed by default, expands on hover/focus.
   document.body.classList.add("sidebar-collapsed");
   refreshMyProfileIcon();
+  refreshBrandIdentity();
   window.addEventListener("auth:changed", refreshMyProfileIcon);
+  window.addEventListener("auth:changed", refreshBrandIdentity);
 }
 
 initTheme();
@@ -465,6 +483,15 @@ function formatNotificationTime(value) {
 }
 
 function notificationTargetUrl(item) {
+  if (item && item.event_type === "new_message" && item.actor && item.actor.id) {
+    return `/chats?open_user_id=${item.actor.id}`;
+  }
+  if (item && item.event_type === "new_follower" && item.actor && item.actor.id) {
+    return `/user/${item.actor.id}`;
+  }
+  if (item && item.event_type === "new_story") {
+    return "/community-feed";
+  }
   if (item && item.post_id) {
     if (item.comment_id) {
       return `/community-feed?post_id=${item.post_id}&comment_id=${item.comment_id}`;
@@ -504,6 +531,9 @@ function initNotificationCenter() {
   const readAllBtn = document.getElementById("notif-read-all-btn");
   const listEl = document.getElementById("notif-list");
   let pollTimer = null;
+  let socket = null;
+  let reconnectTimer = null;
+  let bellShakeTimer = null;
   let items = [];
   let latestId = 0;
 
@@ -514,9 +544,31 @@ function initNotificationCenter() {
     }
   };
 
+  const stopRealtime = () => {
+    if (reconnectTimer) {
+      window.clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (socket) {
+      try {
+        socket.onopen = null;
+        socket.onmessage = null;
+        socket.onerror = null;
+        socket.onclose = null;
+        socket.close();
+      } catch {
+        // no-op
+      }
+      socket = null;
+    }
+  };
+
   const render = () => {
-    const hasUnread = items.some((item) => !item.is_read);
+    const unreadCount = items.filter((item) => !item.is_read).length;
+    const hasUnread = unreadCount > 0;
     unreadDot.classList.toggle("hidden", !hasUnread);
+    unreadDot.textContent = unreadCount > 99 ? "99+" : String(unreadCount || "");
+    unreadDot.setAttribute("aria-label", unreadCount ? `${unreadCount} unread notifications` : "No unread notifications");
 
     if (!items.length) {
       listEl.innerHTML = `<p class="notif-empty">No notifications yet.</p>`;
@@ -560,6 +612,63 @@ function initNotificationCenter() {
     latestId = Math.max(latestId, ...incoming.map((entry) => entry.id));
   };
 
+  const triggerBellShake = () => {
+    if (!bellBtn) return;
+    bellBtn.classList.remove("is-shaking");
+    void bellBtn.offsetWidth;
+    bellBtn.classList.add("is-shaking");
+    if (bellShakeTimer) {
+      window.clearTimeout(bellShakeTimer);
+    }
+    bellShakeTimer = window.setTimeout(() => {
+      bellBtn.classList.remove("is-shaking");
+      bellShakeTimer = null;
+    }, 820);
+  };
+
+  const scheduleReconnect = () => {
+    if (reconnectTimer || !getToken()) return;
+    reconnectTimer = window.setTimeout(() => {
+      reconnectTimer = null;
+      connectRealtime();
+    }, 2500);
+  };
+
+  const connectRealtime = () => {
+    if (!("WebSocket" in window)) return;
+    if (!getToken()) return;
+    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+    const wsUrl = new URL("/ws/notifications", window.location.origin);
+    wsUrl.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    wsUrl.searchParams.set("token", getToken());
+    socket = new WebSocket(wsUrl.toString());
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data || "{}");
+        if (payload?.type !== "notification" || !payload.notification) return;
+        mergeNewItems([payload.notification]);
+        render();
+        triggerBellShake();
+      } catch {
+        // ignore malformed frames
+      }
+    };
+    socket.onerror = () => {
+      try {
+        socket?.close();
+      } catch {
+        // no-op
+      }
+    };
+    socket.onclose = (event) => {
+      socket = null;
+      if (event && event.code === 4401) {
+        return;
+      }
+      scheduleReconnect();
+    };
+  };
+
   const loadInitial = async () => {
     const data = await api("/api/notifications?limit=30");
     items = Array.isArray(data) ? data : [];
@@ -577,6 +686,7 @@ function initNotificationCenter() {
     if (!incoming.length) return;
     mergeNewItems(incoming);
     render();
+    triggerBellShake();
   };
 
   const startPolling = async () => {
@@ -590,6 +700,7 @@ function initNotificationCenter() {
     pollTimer = window.setInterval(() => {
       pollNew().catch(() => {});
     }, 6000);
+    connectRealtime();
   };
 
   const refreshAuthState = () => {
@@ -598,6 +709,7 @@ function initNotificationCenter() {
       shell.classList.add("hidden");
       panel.classList.add("hidden");
       stopPolling();
+      stopRealtime();
       return;
     }
     shell.classList.remove("hidden");

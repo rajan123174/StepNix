@@ -23,6 +23,7 @@ class UserOut(BaseModel):
     post_count: int = 0
     follower_count: int = 0
     following_count: int = 0
+    current_streak: int = 0
     is_following: bool = False
     is_active: bool = False
 
@@ -52,6 +53,8 @@ class PostOut(BaseModel):
     like_count: int
     liked_by_me: bool = False
     comment_count: int
+    new_streak_count: int = 0
+    streak_just_increased: bool = False
     created_at: datetime
 
 

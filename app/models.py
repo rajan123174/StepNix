@@ -17,6 +17,8 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(120), nullable=False)
     bio: Mapped[str] = mapped_column(String(250), default="", nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    current_streak: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_post_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     posts: Mapped[list["Post"]] = relationship(back_populates="author", cascade="all, delete-orphan")
     comments: Mapped[list["Comment"]] = relationship(back_populates="author", cascade="all, delete-orphan")

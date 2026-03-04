@@ -2,6 +2,8 @@ const form = document.getElementById("post-form");
 const statusEl = document.getElementById("status");
 const fileInput = document.getElementById("screenshots");
 const selectedMediaList = document.getElementById("selected-media-list");
+const streakCounterEl = document.getElementById("streak-counter");
+const streakValueEl = document.getElementById("streak-value");
 const selectedFiles = [];
 const previewObjectUrls = [];
 
@@ -91,6 +93,39 @@ function renderSelectedFiles() {
   `;
 }
 
+function renderStreakState(count) {
+  if (!streakCounterEl || !streakValueEl) return;
+  const value = Math.max(0, Number(count) || 0);
+  streakValueEl.textContent = String(value);
+  const isActive = value > 0;
+  streakCounterEl.classList.toggle("streak-active", isActive);
+  streakCounterEl.classList.toggle("streak-broken", !isActive);
+}
+
+function triggerStreakBurst() {
+  if (!streakValueEl || typeof window.confetti !== "function") return;
+  const rect = streakValueEl.getBoundingClientRect();
+  const origin = {
+    x: (rect.left + rect.width / 2) / window.innerWidth,
+    y: (rect.top + rect.height / 2) / window.innerHeight,
+  };
+  window.confetti({
+    particleCount: 90,
+    spread: 78,
+    startVelocity: 42,
+    scalar: 0.9,
+    ticks: 180,
+    origin,
+  });
+  window.confetti({
+    particleCount: 44,
+    spread: 120,
+    startVelocity: 28,
+    scalar: 0.72,
+    origin,
+  });
+}
+
 if (!App.requireAuth()) {
   // redirected
 }
@@ -98,6 +133,9 @@ if (!App.requireAuth()) {
 const user = App.getAuthUser();
 if (user) {
   statusEl.textContent = `Posting as @${user.username}`;
+  renderStreakState(user.current_streak || 0);
+} else {
+  renderStreakState(0);
 }
 
 renderSelectedFiles();
@@ -138,18 +176,34 @@ form.addEventListener("submit", async (event) => {
   formData.append("goal_title", document.getElementById("goal-title").value.trim());
   formData.append("caption", document.getElementById("caption").value.trim());
   formData.append("day_experience", document.getElementById("day-experience").value.trim());
+  formData.append("timezone_offset_minutes", String(new Date().getTimezoneOffset()));
 
   for (const file of selectedFiles) {
     formData.append("screenshots", file);
   }
 
   try {
-    await App.api("/api/posts", { method: "POST", body: formData });
+    const result = await App.api("/api/posts", { method: "POST", body: formData });
     form.reset();
     selectedFiles.length = 0;
     renderSelectedFiles();
-    statusEl.textContent = "Progress posted.";
-    window.location.href = "/community-feed";
+    const streakCount = Number(result?.new_streak_count) || 0;
+    const streakJustIncreased = Boolean(result?.streak_just_increased);
+    renderStreakState(streakCount);
+    if (streakJustIncreased) {
+      triggerStreakBurst();
+    }
+    const existingUser = App.getAuthUser();
+    if (existingUser) {
+      App.setAuth(App.getToken(), { ...existingUser, current_streak: streakCount });
+    }
+    statusEl.textContent = streakJustIncreased
+      ? `Progress posted. Streak up to ${streakCount}.`
+      : `Progress posted. Current streak: ${streakCount}.`;
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Publish";
+    }
   } catch (error) {
     statusEl.textContent = error.message;
     if (submitBtn) {

@@ -215,10 +215,159 @@ body {
   background: linear-gradient(120deg, var(--accent-2), var(--accent));
 }
 
+.btn.about-btn {
+  background: linear-gradient(120deg, #14b8a6, #0ea5e9);
+  border-color: rgba(118, 230, 224, 0.55);
+  box-shadow: 0 12px 28px rgba(20, 184, 166, 0.22);
+}
+
 .btn.ghost {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(182, 210, 239, 0.45);
   color: #dcecff;
+}
+
+.about-shell {
+  position: relative;
+  z-index: 1;
+  width: min(1200px, calc(100vw - 1.4rem));
+  margin: 0 auto;
+  padding: clamp(2.6rem, 6vw, 5rem) 0 clamp(1rem, 3vw, 2rem);
+  display: grid;
+  gap: 1rem;
+}
+
+.about-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.about-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--text-main);
+  text-decoration: none;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.about-brand img {
+  width: clamp(3.25rem, 10vw, 4.6rem);
+  height: auto;
+  display: block;
+  filter: drop-shadow(0 8px 16px rgba(23, 82, 163, 0.28));
+}
+
+.about-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.about-hero,
+.about-section {
+  border-radius: 24px;
+  border: 1px solid var(--panel-stroke);
+  background: var(--panel-bg);
+  backdrop-filter: blur(10px) saturate(1.12);
+  -webkit-backdrop-filter: blur(10px) saturate(1.12);
+  box-shadow: 0 20px 42px rgba(0, 0, 0, 0.36);
+  padding: clamp(1rem, 2.4vw, 1.7rem);
+}
+
+.about-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(16rem, 0.85fr);
+  gap: 1rem;
+  align-items: center;
+}
+
+.about-copy h1,
+.about-section h2 {
+  margin: 0;
+  text-wrap: balance;
+}
+
+.about-copy h1 {
+  font-size: clamp(2rem, 5vw, 4rem);
+}
+
+.about-copy p,
+.about-section p {
+  margin: 0.9rem 0 0;
+  color: var(--text-soft);
+  font-size: clamp(0.96rem, 1.8vw, 1.08rem);
+  line-height: 1.72;
+}
+
+.about-copy .welcome-message {
+  color: #e8f5ff;
+  font-size: clamp(1rem, 2vw, 1.14rem);
+}
+
+.founder-card {
+  border: 1px solid rgba(179, 206, 235, 0.24);
+  border-radius: 20px;
+  background: rgba(8, 18, 33, 0.56);
+  padding: clamp(1rem, 2vw, 1.25rem);
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 0.8rem;
+}
+
+.founder-avatar {
+  width: clamp(7rem, 18vw, 10rem);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  padding: 0.3rem;
+  background: linear-gradient(135deg, rgba(49, 168, 255, 0.85), rgba(20, 184, 166, 0.85));
+  box-shadow: 0 18px 32px rgba(8, 25, 52, 0.28);
+}
+
+.founder-avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  border: 2px solid rgba(8, 18, 33, 0.56);
+}
+
+.founder-card h3 {
+  margin: 0;
+  font-size: clamp(1.2rem, 2vw, 1.5rem);
+}
+
+.founder-card p {
+  margin: 0;
+  color: var(--text-soft);
+}
+
+.quote-chip {
+  width: 100%;
+  border-radius: 16px;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(182, 210, 239, 0.22);
+  background: linear-gradient(145deg, rgba(14, 165, 163, 0.18), rgba(49, 168, 255, 0.14));
+  color: #ebf6ff;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.about-section h2 {
+  font-size: clamp(1.5rem, 3vw, 2.5rem);
+}
+
+.about-section .vision-tag {
+  margin: 0;
+  color: #d7ecff;
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  font-weight: 800;
 }
 
 .features-card h3 {
@@ -297,6 +446,10 @@ body {
     grid-template-columns: 1fr;
     gap: 0.85rem;
   }
+
+  .about-hero {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -329,7 +482,9 @@ body {
 
   .hero-card,
   .features-card,
-  .goal-card {
+  .goal-card,
+  .about-hero,
+  .about-section {
     border-radius: 20px;
   }
 }
@@ -353,7 +508,8 @@ body {
   }
 
   .landing-intro,
-  .hero-wrap {
+  .hero-wrap,
+  .about-shell {
     width: min(100%, calc(100vw - 1rem));
   }
 
@@ -372,14 +528,16 @@ body {
   }
 
   .head-actions,
-  .hero-actions {
+  .hero-actions,
+  .about-actions {
     width: 100%;
     display: grid;
     grid-template-columns: 1fr;
   }
 
   .head-actions .btn,
-  .hero-actions .btn {
+  .hero-actions .btn,
+  .about-actions .btn {
     width: 100%;
   }
 
@@ -390,9 +548,24 @@ body {
 
   .hero-card,
   .features-card,
-  .goal-card {
+  .goal-card,
+  .about-hero,
+  .about-section {
     border-radius: 18px;
     padding: 0.85rem;
+  }
+
+  .about-topbar {
+    align-items: flex-start;
+  }
+
+  .founder-card {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .founder-avatar {
+    width: clamp(6.2rem, 24vw, 8rem);
   }
 
   .feature-grid article {

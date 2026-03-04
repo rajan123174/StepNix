@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=133" />
+    <link rel="stylesheet" href="/static/styles.css?v=143" />
   </head>
   <body>
     <nav class="site-nav">
@@ -24,7 +24,16 @@
 
     <section class="page-head">
       <h1>New Daily Progress</h1>
-      <p>Create a progress post as your logged-in account.</p>
+      <p>Consistency builds greatness.........</p>
+      <div class="streak-wrap" aria-live="polite">
+        <div id="streak-counter" class="streak-counter streak-broken" title="Your daily streak">
+          <span class="streak-emoji" aria-hidden="true">🔥</span>
+          <span class="streak-copy">
+            <span class="streak-label">Daily streak</span>
+            <span id="streak-value" class="streak-value">0</span>
+          </span>
+        </div>
+      </div>
     </section>
 
     <main>
@@ -41,7 +50,8 @@
       </section>
     </main>
 
-    <script src="/static/common.js?v=32"></script>
-    <script src="/static/new-progress.js?v=7"></script>
+    <script src="/static/common.js?v=38"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+    <script src="/static/new-progress.js?v=8"></script>
   </body>
 </html>

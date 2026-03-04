@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -13,12 +14,12 @@ import uuid
 from collections import defaultdict
 from urllib import parse, request
 from base64 import b64encode, urlsafe_b64decode, urlsafe_b64encode
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any, cast
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -125,12 +126,59 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+class NotificationHub:
+    def __init__(self) -> None:
+        self._connections: dict[int, set[WebSocket]] = defaultdict(set)
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    async def connect(self, user_id: int, websocket: WebSocket) -> None:
+        await websocket.accept()
+        self._connections[user_id].add(websocket)
+        self._loop = asyncio.get_running_loop()
+
+    async def disconnect(self, user_id: int, websocket: WebSocket) -> None:
+        sockets = self._connections.get(user_id)
+        if not sockets:
+            return
+        sockets.discard(websocket)
+        if not sockets:
+            self._connections.pop(user_id, None)
+
+    async def _publish(self, user_id: int, payload: dict[str, Any]) -> None:
+        sockets = list(self._connections.get(user_id) or ())
+        if not sockets:
+            return
+        stale: list[WebSocket] = []
+        for socket in sockets:
+            try:
+                await socket.send_json(payload)
+            except Exception:
+                stale.append(socket)
+        for socket in stale:
+            await self.disconnect(user_id, socket)
+
+    def publish(self, user_id: int, payload: dict[str, Any]) -> None:
+        sockets = self._connections.get(user_id)
+        if not sockets or not self._loop:
+            return
+        try:
+            self._loop.call_soon_threadsafe(asyncio.create_task, self._publish(user_id, payload))
+        except RuntimeError:
+            return
+
+
+notification_hub = NotificationHub()
+
 def _ensure_schema() -> None:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255) DEFAULT ''"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255) DEFAULT ''"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile_number VARCHAR(24) DEFAULT ''"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(20) DEFAULT 'prefer_not_to_say'"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS current_streak INTEGER DEFAULT 0"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_post_date TIMESTAMP WITHOUT TIME ZONE"))
+        conn.execute(text("UPDATE users SET current_streak = 0 WHERE current_streak IS NULL"))
         conn.execute(text("UPDATE users SET gender = 'prefer_not_to_say' WHERE gender IS NULL OR gender = ''"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_gender ON users(gender)"))
         conn.execute(
@@ -582,6 +630,11 @@ def home_page():
     return _page("landing.html")
 
 
+@app.get("/about")
+def about_page():
+    return _page("about.html")
+
+
 @app.get("/create-profile")
 def create_profile_page():
     return _page("create-profile.html")
@@ -990,6 +1043,7 @@ def _build_user_out(user: User, db: Session, viewer_id: int | None = None) -> Us
         post_count=post_count,
         follower_count=follower_count,
         following_count=following_count,
+        current_streak=max(0, int(user.current_streak or 0)),
         is_following=is_following,
     )
 
@@ -1028,6 +1082,17 @@ def _build_notification_out(notification: Notification) -> NotificationOut:
     )
 
 
+def _mentioned_user_ids(*texts: str, db: Session, exclude_ids: set[int] | None = None) -> set[int]:
+    usernames: set[str] = set()
+    for text in texts:
+        usernames.update({name.strip().lower() for name in MENTION_PATTERN.findall(text or "") if name.strip()})
+    if not usernames:
+        return set()
+    excluded = exclude_ids or set()
+    rows = db.execute(select(User.id).where(User.username.in_(sorted(usernames)))).all()
+    return {int(row[0]) for row in rows if int(row[0]) not in excluded}
+
+
 def _create_notifications(
     db: Session,
     recipient_ids: set[int] | list[int],
@@ -1037,24 +1102,34 @@ def _create_notifications(
     message: str = "",
     post_id: int | None = None,
     comment_id: int | None = None,
-) -> None:
+) -> list[Notification]:
     unique_ids = {rid for rid in recipient_ids if rid and rid != actor_id}
     if not unique_ids:
-        return
-    db.add_all(
-        [
-            Notification(
-                recipient_id=rid,
-                actor_id=actor_id,
-                event_type=event_type,
-                title=title[:180],
-                message=message[:350],
-                post_id=post_id,
-                comment_id=comment_id,
-            )
-            for rid in unique_ids
-        ]
-    )
+        return []
+    created = [
+        Notification(
+            recipient_id=rid,
+            actor_id=actor_id,
+            event_type=event_type,
+            title=title[:180],
+            message=message[:350],
+            post_id=post_id,
+            comment_id=comment_id,
+        )
+        for rid in unique_ids
+    ]
+    db.add_all(created)
+    db.flush()
+    return created
+
+
+def _publish_notification_rows(rows: list[Notification]) -> None:
+    for row in rows:
+        payload = {
+            "type": "notification",
+            "notification": _build_notification_out(row).model_dump(mode="json"),
+        }
+        notification_hub.publish(row.recipient_id, payload)
 
 
 def _send_otp_email(
@@ -1221,7 +1296,23 @@ def _send_plain_email(target_email: str, subject: str, content: str) -> tuple[bo
         return False, f"SMTP delivery failed: {exc}"
 
 
-def _build_post_out(post: Post, db: Session, viewer_id: int | None = None) -> PostOut:
+def _queue_plain_email(background_tasks: BackgroundTasks | None, target_email: str, subject: str, content: str) -> None:
+    email_clean = (target_email or "").strip().lower()
+    if not email_clean:
+        return
+    if background_tasks is None:
+        _send_plain_email(email_clean, subject, content)
+        return
+    background_tasks.add_task(_send_plain_email, email_clean, subject, content)
+
+
+def _build_post_out(
+    post: Post,
+    db: Session,
+    viewer_id: int | None = None,
+    new_streak_count: int = 0,
+    streak_just_increased: bool = False,
+) -> PostOut:
     liked_by_me = False
     if viewer_id:
         liked_by_me = any(like.user_id == viewer_id for like in post.likes)
@@ -1235,6 +1326,8 @@ def _build_post_out(post: Post, db: Session, viewer_id: int | None = None) -> Po
         like_count=len(post.likes),
         liked_by_me=liked_by_me,
         comment_count=len(post.comments),
+        new_streak_count=max(0, int(new_streak_count or 0)),
+        streak_just_increased=bool(streak_just_increased),
         created_at=post.created_at,
     )
 
@@ -1252,6 +1345,36 @@ def _is_valid_email(email: str) -> bool:
 
 def _story_cutoff() -> datetime:
     return datetime.utcnow() - timedelta(hours=24)
+
+
+def _resolve_streak_for_local_post(
+    user: User,
+    *,
+    timezone_offset_minutes: int,
+    now_utc: datetime | None = None,
+) -> tuple[int, bool]:
+    offset_minutes = max(-840, min(840, int(timezone_offset_minutes or 0)))
+    current_utc = (now_utc or datetime.utcnow()).replace(microsecond=0)
+    current_utc_aware = current_utc.replace(tzinfo=timezone.utc)
+    local_today = (current_utc_aware - timedelta(minutes=offset_minutes)).date()
+
+    previous_streak = max(0, int(user.current_streak or 0))
+    last_post_value = user.last_post_date
+    if not last_post_value:
+        return 1, previous_streak < 1
+
+    last_post_utc = last_post_value.replace(tzinfo=timezone.utc)
+    last_local_date = (last_post_utc - timedelta(minutes=offset_minutes)).date()
+    day_gap = (local_today - last_local_date).days
+
+    if day_gap == 0:
+        resolved = previous_streak if previous_streak > 0 else 1
+        return resolved, resolved > previous_streak
+    if day_gap == 1:
+        base_streak = previous_streak if previous_streak > 0 else 1
+        resolved = base_streak + 1
+        return resolved, resolved > previous_streak
+    return 1, previous_streak < 1
 
 
 def _build_story_out(story: Story, viewer_id: int | None = None) -> StoryOut:
@@ -1349,6 +1472,21 @@ def _reaction_summary(comment: Comment) -> tuple[int, dict[str, int]]:
     return len(comment.reactions), summary
 
 
+def _chat_notification_preview(raw_content: str) -> str:
+    content = (raw_content or "").strip()
+    if not content:
+        return "Sent you a message."
+    story_match = re.match(r"^\[\[STEPNIX_SHARE_STORY:(\d+)\]\](?:\n([\s\S]*))?$", content)
+    if story_match:
+        reply_text = (story_match.group(2) or "").strip()
+        return f"Shared a story: {reply_text[:120]}" if reply_text else "Shared a story with you."
+    post_match = re.match(r"^\[\[STEPNIX_SHARE_POST:(\d+)\]\](?:\n([\s\S]*))?$", content)
+    if post_match:
+        reply_text = (post_match.group(2) or "").strip()
+        return f"Shared a post: {reply_text[:120]}" if reply_text else "Shared a post with you."
+    return content[:160]
+
+
 def _require_user(
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
@@ -1376,6 +1514,24 @@ def _optional_user(
     token_value = authorization.split(" ", 1)[1].strip()
     token = (
         db.execute(select(AuthToken).options(joinedload(AuthToken.user)).where(AuthToken.token == token_value))
+        .scalars()
+        .first()
+    )
+    if not token or not token.user:
+        return None
+    return token.user
+
+
+def _user_from_token_value(token_value: str, db: Session) -> User | None:
+    clean = (token_value or "").strip()
+    if not clean:
+        return None
+    token = (
+        db.execute(
+            select(AuthToken)
+            .options(joinedload(AuthToken.user).joinedload(User.profile_photo))
+            .where(AuthToken.token == clean)
+        )
         .scalars()
         .first()
     )
@@ -1582,7 +1738,12 @@ def register(
 
 
 @app.post("/api/auth/login", response_model=AuthOut)
-def login(payload: LoginIn, db: Session = Depends(get_db)):
+def login(
+    payload: LoginIn,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     ident = payload.identifier.strip().lower()
     user = (
         db.execute(
@@ -1594,11 +1755,39 @@ def login(payload: LoginIn, db: Session = Depends(get_db)):
         .first()
     )
     if not user or not _verify_password(payload.password, user.password_hash):
+        if user and (user.email or "").strip():
+            ip_address = _get_client_ip(request)
+            _queue_plain_email(
+                background_tasks,
+                user.email,
+                "StepNix login attempt alert",
+                (
+                    "A failed login attempt was detected for your StepNix account.\n\n"
+                    f"Username: @{user.username}\n"
+                    f"Time (UTC): {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"IP Address: {ip_address}\n\n"
+                    "If this was not you, reset your password immediately."
+                ),
+            )
         raise HTTPException(status_code=401, detail="Invalid username/email or password")
 
     token_value = secrets.token_urlsafe(32)
     db.add(AuthToken(user_id=user.id, token=token_value))
     db.commit()
+    if (user.email or "").strip():
+        ip_address = _get_client_ip(request)
+        _queue_plain_email(
+            background_tasks,
+            user.email,
+            "StepNix login alert",
+            (
+                "A successful login was detected for your StepNix account.\n\n"
+                f"Username: @{user.username}\n"
+                f"Time (UTC): {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"IP Address: {ip_address}\n\n"
+                "If this was not you, secure your account immediately."
+            ),
+        )
     return AuthOut(token=token_value, user=_build_user_out(user, db, user.id))
 
 
@@ -2894,6 +3083,14 @@ def send_chat_message(
         raise HTTPException(status_code=400, detail="Message cannot be empty")
     row = ChatMessage(sender_id=current_user.id, receiver_id=user_id, content=body)
     db.add(row)
+    created_notifications = _create_notifications(
+        db=db,
+        recipient_ids={user_id},
+        actor_id=current_user.id,
+        event_type="new_message",
+        title=f"@{current_user.username} sent you a message",
+        message=_chat_notification_preview(body),
+    )
     typing_row = (
         db.execute(
             select(ChatTypingState).where(
@@ -2908,6 +3105,7 @@ def send_chat_message(
         typing_row.is_typing = False
         typing_row.updated_at = datetime.utcnow()
     db.commit()
+    _publish_notification_rows(created_notifications)
     db.refresh(row)
     return _build_chat_message_out(row, db, current_user.id)
 
@@ -3060,6 +3258,34 @@ def mark_all_notifications_read(current_user: User = Depends(_require_user), db:
     return {"detail": "All notifications marked as read", "updated": len(rows)}
 
 
+@app.websocket("/ws/notifications")
+async def notifications_websocket(websocket: WebSocket):
+    token_value = (websocket.query_params.get("token") or "").strip()
+    if not token_value:
+        await websocket.close(code=4401)
+        return
+
+    with Session(engine) as db:
+        user = _user_from_token_value(token_value, db)
+    if not user:
+        await websocket.close(code=4401)
+        return
+
+    await notification_hub.connect(user.id, websocket)
+    try:
+        await websocket.send_json({"type": "ready"})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await notification_hub.disconnect(user.id, websocket)
+    except Exception:
+        await notification_hub.disconnect(user.id, websocket)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 @app.get("/api/users", response_model=list[UserOut])
 def list_users(db: Session = Depends(get_db)):
     users = db.execute(select(User).options(joinedload(User.profile_photo)).order_by(User.username.asc())).scalars().all()
@@ -3093,9 +3319,19 @@ def follow_user(user_id: int, current_user: User = Depends(_require_user), db: S
         .scalars()
         .first()
     )
+    created_notifications: list[Notification] = []
     if not existing:
         db.add(UserFollow(follower_id=current_user.id, following_id=user_id))
+        created_notifications = _create_notifications(
+            db=db,
+            recipient_ids={user_id},
+            actor_id=current_user.id,
+            event_type="new_follower",
+            title=f"@{current_user.username} started following you",
+            message="Your motivation circle just grew.",
+        )
         db.commit()
+        _publish_notification_rows(created_notifications)
 
     refreshed = db.execute(select(User).options(joinedload(User.profile_photo)).where(User.id == user_id)).scalars().first()
     if not refreshed:
@@ -3330,15 +3566,27 @@ def create_post(
     goal_title: str = Form(...),
     caption: str = Form(""),
     day_experience: str = Form(""),
+    timezone_offset_minutes: int = Form(0),
     screenshots: list[UploadFile] = File(default=[]),
     current_user: User = Depends(_require_user),
     db: Session = Depends(get_db),
 ):
+    goal_title_clean = goal_title.strip()
+    caption_clean = caption.strip()
+    day_experience_clean = day_experience.strip()
+    now_utc = datetime.utcnow().replace(microsecond=0)
+    new_streak_count, streak_just_increased = _resolve_streak_for_local_post(
+        current_user,
+        timezone_offset_minutes=timezone_offset_minutes,
+        now_utc=now_utc,
+    )
+    current_user.current_streak = new_streak_count
+    current_user.last_post_date = now_utc
     post = Post(
         author_id=current_user.id,
-        goal_title=goal_title.strip(),
-        caption=caption.strip(),
-        day_experience=day_experience.strip(),
+        goal_title=goal_title_clean,
+        caption=caption_clean,
+        day_experience=day_experience_clean,
     )
     db.add(post)
     db.flush()
@@ -3352,21 +3600,31 @@ def create_post(
     follower_ids = set(
         db.execute(select(UserFollow.follower_id).where(UserFollow.following_id == current_user.id)).scalars().all()
     )
-    following_ids = set(
-        db.execute(select(UserFollow.following_id).where(UserFollow.follower_id == current_user.id)).scalars().all()
-    )
-    audience_ids = follower_ids | following_ids
-    _create_notifications(
+    mention_text = "\n".join(part for part in [caption_clean, day_experience_clean] if part)
+    mentioned_ids = _mentioned_user_ids(mention_text, db=db, exclude_ids={current_user.id})
+    created_notifications = _create_notifications(
         db=db,
-        recipient_ids=audience_ids,
+        recipient_ids=follower_ids - mentioned_ids,
         actor_id=current_user.id,
         event_type="new_progress",
         title=f"@{current_user.username} posted new daily progress",
-        message=goal_title.strip()[:140],
+        message=goal_title_clean[:140],
         post_id=post.id,
+    )
+    created_notifications.extend(
+        _create_notifications(
+            db=db,
+            recipient_ids=mentioned_ids,
+            actor_id=current_user.id,
+            event_type="post_mention",
+            title=f"@{current_user.username} mentioned you in a progress post",
+            message=(mention_text or goal_title_clean)[:160],
+            post_id=post.id,
+        )
     )
 
     db.commit()
+    _publish_notification_rows(created_notifications)
 
     created = (
         db.execute(
@@ -3385,7 +3643,13 @@ def create_post(
     )
     if not created:
         raise HTTPException(status_code=500, detail="Failed to load post")
-    return _build_post_out(created, db, current_user.id)
+    return _build_post_out(
+        created,
+        db,
+        current_user.id,
+        new_streak_count=new_streak_count,
+        streak_just_increased=streak_just_increased,
+    )
 
 
 @app.delete("/api/posts/{post_id}")
@@ -3859,6 +4123,36 @@ def post_preview(post_id: int, current_user: User = Depends(_require_user), db: 
     }
 
 
+@app.get("/api/stories/{story_id}/preview")
+def story_preview(story_id: int, current_user: User = Depends(_require_user), db: Session = Depends(get_db)):
+    story = (
+        db.execute(
+            select(Story)
+            .where(Story.id == story_id)
+            .options(
+                joinedload(Story.author).joinedload(User.profile_photo),
+                joinedload(Story.views),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    return {
+        "id": story.id,
+        "caption": story.caption,
+        "author_id": story.author.id,
+        "author_username": story.author.username,
+        "author_photo_url": f"/{story.author.profile_photo.image_path}" if story.author.profile_photo else None,
+        "media_url": f"/{story.media_path}" if story.media_path else "",
+        "media_type": story.media_type or ("video" if _is_video_path(story.media_path) else "image"),
+        "story_url": f"/community-feed?story_user_id={story.author.id}",
+        "created_at": story.created_at.isoformat(),
+    }
+
+
 @app.post("/api/stories", response_model=StoryOut)
 def create_story(
     story_media: UploadFile = File(...),
@@ -3870,6 +4164,10 @@ def create_story(
     if not story_media.filename:
         raise HTTPException(status_code=400, detail="Story media is required")
 
+    follower_ids = set(
+        db.execute(select(UserFollow.follower_id).where(UserFollow.following_id == current_user.id)).scalars().all()
+    )
+    created_notifications: list[Notification] = []
     ext = os.path.splitext(story_media.filename)[1].lower()
     if ext in ALLOWED_IMAGE_EXT:
         sticker_data_clean = _sanitize_sticker_data(sticker_data)
@@ -3883,7 +4181,16 @@ def create_story(
             sticker_data=sticker_data_clean,
         )
         db.add(story)
+        created_notifications = _create_notifications(
+            db=db,
+            recipient_ids=follower_ids,
+            actor_id=current_user.id,
+            event_type="new_story",
+            title=f"@{current_user.username} posted a new story",
+            message=(caption.strip() or "New 24h story")[:160],
+        )
         db.commit()
+        _publish_notification_rows(created_notifications)
         db.refresh(story)
         return _build_story_out(story, current_user.id)
 
@@ -3922,7 +4229,16 @@ def create_story(
                         sticker_data=sticker_data_clean,
                     )
                 )
+        created_notifications = _create_notifications(
+            db=db,
+            recipient_ids=follower_ids,
+            actor_id=current_user.id,
+            event_type="new_story",
+            title=f"@{current_user.username} posted a new story",
+            message=(caption.strip() or "New 24h story")[:160],
+        )
         db.commit()
+        _publish_notification_rows(created_notifications)
         newest = (
             db.execute(select(Story).where(Story.author_id == current_user.id).order_by(desc(Story.id)).limit(1))
             .scalars()
@@ -4207,6 +4523,7 @@ def like_post(post_id: int, current_user: User = Depends(_require_user), db: Ses
     like = PostLike(post_id=post_id, user_id=current_user.id)
     db.add(like)
     created_like = True
+    created_notifications: list[Notification] = []
     try:
         db.commit()
     except IntegrityError:
@@ -4214,7 +4531,7 @@ def like_post(post_id: int, current_user: User = Depends(_require_user), db: Ses
         created_like = False
 
     if created_like and post.author_id != current_user.id:
-        _create_notifications(
+        created_notifications = _create_notifications(
             db=db,
             recipient_ids={post.author_id},
             actor_id=current_user.id,
@@ -4224,6 +4541,7 @@ def like_post(post_id: int, current_user: User = Depends(_require_user), db: Ses
             post_id=post.id,
         )
         db.commit()
+        _publish_notification_rows(created_notifications)
     count = db.query(PostLike).filter(PostLike.post_id == post_id).count()
     return {"like_count": count}
 
@@ -4334,18 +4652,41 @@ def add_comment(
     db.commit()
     db.refresh(comment)
 
+    created_notifications: list[Notification] = []
     if post.author_id != current_user.id:
-        _create_notifications(
-            db=db,
-            recipient_ids={post.author_id},
-            actor_id=current_user.id,
-            event_type="post_comment",
-            title=f"@{current_user.username} commented on your post",
-            message=payload.content.strip()[:160],
-            post_id=post.id,
-            comment_id=comment.id,
+        created_notifications.extend(
+            _create_notifications(
+                db=db,
+                recipient_ids={post.author_id},
+                actor_id=current_user.id,
+                event_type="post_comment",
+                title=f"@{current_user.username} commented on your post",
+                message=payload.content.strip()[:160],
+                post_id=post.id,
+                comment_id=comment.id,
+            )
         )
+    mentioned_ids = _mentioned_user_ids(
+        payload.content.strip(),
+        db=db,
+        exclude_ids={current_user.id, post.author_id},
+    )
+    if mentioned_ids:
+        created_notifications.extend(
+            _create_notifications(
+                db=db,
+                recipient_ids=mentioned_ids,
+                actor_id=current_user.id,
+                event_type="comment_mention",
+                title=f"@{current_user.username} mentioned you in a comment",
+                message=payload.content.strip()[:160],
+                post_id=post.id,
+                comment_id=comment.id,
+            )
+        )
+    if created_notifications:
         db.commit()
+        _publish_notification_rows(created_notifications)
 
     return CommentOut(
         id=comment.id,
@@ -4391,8 +4732,9 @@ def react_to_comment(
         db.add(CommentReaction(comment_id=comment_id, user_id=current_user.id, reaction_type=reaction_type))
     db.commit()
 
+    created_notifications: list[Notification] = []
     if comment.author_id != current_user.id and previous_reaction != reaction_type:
-        _create_notifications(
+        created_notifications = _create_notifications(
             db=db,
             recipient_ids={comment.author_id},
             actor_id=current_user.id,
@@ -4403,6 +4745,7 @@ def react_to_comment(
             comment_id=comment.id,
         )
         db.commit()
+        _publish_notification_rows(created_notifications)
 
     comment_row = (
         db.execute(select(Comment).options(joinedload(Comment.reactions)).where(Comment.id == comment_id))

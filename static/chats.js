@@ -45,7 +45,9 @@ let typingPartnerId = null;
 let selectedDeleteMessageId = null;
 let selectedDeleteCanEveryone = false;
 const sharedPostPattern = /^\[\[STEPNIX_SHARE_POST:(\d+)\]\]$/;
+const sharedStoryPattern = /^\[\[STEPNIX_SHARE_STORY:(\d+)\]\](?:\n([\s\S]*))?$/;
 const sharedPostPreviewCache = new Map();
+const sharedStoryPreviewCache = new Map();
 const mobileChatMedia = window.matchMedia("(max-width: 768px)");
 
 function isMobileChatLayout() {
@@ -54,6 +56,21 @@ function isMobileChatLayout() {
 
 function syncMobileChatState() {
   chatApp.classList.toggle("mobile-thread-open", !!(isMobileChatLayout() && selectedUser));
+}
+
+function syncMobileChatHeight() {
+  if (!chatApp) return;
+  if (!isMobileChatLayout() || chatApp.classList.contains("hidden")) {
+    chatApp.style.removeProperty("--mobile-chat-height");
+    return;
+  }
+  const navHeight = Number.parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue("--mobile-nav-height")
+  ) || 70;
+  const rect = chatApp.getBoundingClientRect();
+  const viewportHeight = window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0;
+  const available = Math.max(320, Math.floor(viewportHeight - rect.top - navHeight - 8));
+  chatApp.style.setProperty("--mobile-chat-height", `${available}px`);
 }
 
 function deviceId() {
@@ -83,6 +100,17 @@ function parseSharedPostId(content) {
   return Number.isFinite(postId) && postId > 0 ? postId : 0;
 }
 
+function parseSharedStoryPayload(content) {
+  const match = sharedStoryPattern.exec(String(content || "").trim());
+  if (!match) return null;
+  const storyId = Number(match[1]);
+  if (!Number.isFinite(storyId) || storyId <= 0) return null;
+  return {
+    storyId,
+    replyText: String(match[2] || "").trim(),
+  };
+}
+
 function sharedPostFallback(postId) {
   return {
     id: postId,
@@ -103,6 +131,26 @@ async function loadSharedPostPreview(postId) {
   return promise;
 }
 
+function sharedStoryFallback(storyId) {
+  return {
+    id: storyId,
+    caption: "Shared Story",
+    author_username: "user",
+    media_url: "",
+    media_type: "none",
+    story_url: "/community-feed",
+  };
+}
+
+async function loadSharedStoryPreview(storyId) {
+  if (!storyId) return sharedStoryFallback(storyId);
+  if (sharedStoryPreviewCache.has(storyId)) return sharedStoryPreviewCache.get(storyId);
+  const promise = App.api(`/api/stories/${storyId}/preview`)
+    .catch(() => sharedStoryFallback(storyId));
+  sharedStoryPreviewCache.set(storyId, promise);
+  return promise;
+}
+
 function renderSharedPostCardMarkup(postId) {
   return `
     <a class="chat-shared-post-card" data-shared-post-id="${postId}" href="/post/${postId}">
@@ -115,6 +163,21 @@ function renderSharedPostCardMarkup(postId) {
   `;
 }
 
+function renderSharedStoryCardMarkup(storyId, replyText = "") {
+  return `
+    <div class="chat-shared-story-wrap">
+      <a class="chat-shared-post-card chat-shared-story-card" data-shared-story-id="${storyId}" href="/community-feed">
+        <div class="chat-shared-post-thumb loading"></div>
+        <div class="chat-shared-post-meta">
+          <strong>Shared Story</strong>
+          <small>Loading preview...</small>
+        </div>
+      </a>
+      ${replyText ? `<p class="chat-shared-story-note">${escapeText(replyText)}</p>` : ""}
+    </div>
+  `;
+}
+
 function escapeText(text) {
   return (window.App && typeof window.App.escapeHtml === "function")
     ? window.App.escapeHtml(text)
@@ -122,6 +185,10 @@ function escapeText(text) {
 }
 
 function renderMessageBodyMarkup(msg) {
+  const sharedStory = parseSharedStoryPayload(msg.content);
+  if (sharedStory && !msg.deleted_for_everyone) {
+    return renderSharedStoryCardMarkup(sharedStory.storyId, sharedStory.replyText);
+  }
   const sharedPostId = parseSharedPostId(msg.content);
   if (sharedPostId && !msg.deleted_for_everyone) {
     return renderSharedPostCardMarkup(sharedPostId);
@@ -129,8 +196,9 @@ function renderMessageBodyMarkup(msg) {
   return `<p>${escapeText(msg.content)}</p>`;
 }
 
-async function hydrateSharedPostCards() {
+async function hydrateSharedCards() {
   const cards = Array.from(messagesEl.querySelectorAll(".chat-shared-post-card[data-shared-post-id]"));
+  const storyCards = Array.from(messagesEl.querySelectorAll(".chat-shared-story-card[data-shared-story-id]"));
   await Promise.all(
     cards.map(async (card) => {
       const postId = Number(card.getAttribute("data-shared-post-id") || 0);
@@ -156,6 +224,42 @@ async function hydrateSharedPostCards() {
       if (metaSub) metaSub.textContent = `@${preview.author_username || "user"}`;
     })
   );
+  await Promise.all(
+    storyCards.map(async (card) => {
+      const storyId = Number(card.getAttribute("data-shared-story-id") || 0);
+      if (!storyId) return;
+      const preview = await loadSharedStoryPreview(storyId);
+      const thumbEl = card.querySelector(".chat-shared-post-thumb");
+      const metaTitle = card.querySelector(".chat-shared-post-meta strong");
+      const metaSub = card.querySelector(".chat-shared-post-meta small");
+      card.setAttribute("href", preview.story_url || "/community-feed");
+      if (thumbEl) {
+        if (preview.media_url) {
+          if (preview.media_type === "video") {
+            thumbEl.innerHTML = `<video src="${preview.media_url}" muted playsinline preload="metadata"></video>`;
+          } else {
+            thumbEl.innerHTML = `<img src="${preview.media_url}" alt="${escapeText(preview.caption || "Shared story")}" />`;
+          }
+        } else {
+          thumbEl.innerHTML = `<span class="chat-shared-post-empty">No media</span>`;
+        }
+        thumbEl.classList.remove("loading");
+      }
+      if (metaTitle) metaTitle.textContent = preview.caption || "Shared Story";
+      if (metaSub) metaSub.textContent = `@${preview.author_username || "user"}`;
+    })
+  );
+}
+
+function summarizeMessagePreview(content) {
+  const sharedStory = parseSharedStoryPayload(content);
+  if (sharedStory) {
+    return sharedStory.replyText
+      ? `Shared a story: ${sharedStory.replyText}`
+      : "Shared a story";
+  }
+  if (parseSharedPostId(content)) return "Shared a post";
+  return String(content || "");
 }
 
 function closeDeleteModal() {
@@ -238,6 +342,7 @@ function showChatApp() {
   authGate.classList.add("hidden");
   chatApp.classList.remove("hidden");
   syncMobileChatState();
+  syncMobileChatHeight();
 }
 
 function clearOpenUserParam() {
@@ -400,7 +505,7 @@ function renderConversations(items) {
           <span class="chat-convo-row-time">${formatTime(item.last_message_at)}</span>
         </div>
         <small>@${item.user.username}</small>
-        <p>${item.last_message}</p>
+        <p>${escapeText(summarizeMessagePreview(item.last_message))}</p>
       </div>
     `;
     row.addEventListener("click", () => openThread(item.user));
@@ -553,7 +658,7 @@ function renderMessages(list, options = {}) {
       messagesEl.scrollTop = nextTop;
     }
   });
-  hydrateSharedPostCards().catch(() => {});
+  hydrateSharedCards().catch(() => {});
 }
 
 async function openThread(user) {
@@ -564,6 +669,7 @@ async function openThread(user) {
   }
   selectedUser = user;
   syncMobileChatState();
+  syncMobileChatHeight();
   const data = await chatApi(`/api/chat/messages/${user.id}`);
   renderThreadHead(user, !!data.partner_is_typing);
   renderMessages(data.messages || [], { forceScrollBottom: true });
@@ -577,6 +683,7 @@ function closeMobileThread() {
   threadHead.textContent = "Select a user to start chatting";
   messagesEl.innerHTML = "";
   syncMobileChatState();
+  syncMobileChatHeight();
   loadConversations().catch(() => {});
 }
 
@@ -821,6 +928,7 @@ window.addEventListener("auth:changed", () => {
 if (typeof mobileChatMedia.addEventListener === "function") {
   mobileChatMedia.addEventListener("change", () => {
     syncMobileChatState();
+    syncMobileChatHeight();
     if (!isMobileChatLayout() && !selectedUser) {
       loadConversations().catch(() => {});
     }
@@ -828,9 +936,20 @@ if (typeof mobileChatMedia.addEventListener === "function") {
 } else if (typeof mobileChatMedia.addListener === "function") {
   mobileChatMedia.addListener(() => {
     syncMobileChatState();
+    syncMobileChatHeight();
     if (!isMobileChatLayout() && !selectedUser) {
       loadConversations().catch(() => {});
     }
+  });
+}
+
+window.addEventListener("resize", () => {
+  syncMobileChatHeight();
+});
+
+if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
+  window.visualViewport.addEventListener("resize", () => {
+    syncMobileChatHeight();
   });
 }
 

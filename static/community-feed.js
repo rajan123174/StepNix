@@ -18,6 +18,39 @@ let storyVideoEndedHandler = null;
 let storyProgressFrame = null;
 let sharedFocusApplied = false;
 
+function storyReplyDeviceId() {
+  let id = localStorage.getItem("chatDeviceId");
+  if (!id) {
+    id = `dev_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    localStorage.setItem("chatDeviceId", id);
+  }
+  return id;
+}
+
+function storyReplyChatHeaders() {
+  const headers = new Headers();
+  const chatToken = localStorage.getItem("chatToken") || "";
+  if (chatToken) headers.set("X-Chat-Token", chatToken);
+  headers.set("X-Device-Id", storyReplyDeviceId());
+  const authToken = App.getToken();
+  if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
+  return headers;
+}
+
+async function storyReplyChatApi(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  storyReplyChatHeaders().forEach((value, key) => headers.set(key, value));
+  const response = await fetch(path, { ...options, headers });
+  if (!response.ok) {
+    const error = await response
+      .json()
+      .catch(async () => ({ detail: (await response.text().catch(() => "")).trim() || `Request failed (${response.status})` }));
+    throw new Error(error.detail || `Request failed (${response.status})`);
+  }
+  if (response.status === 204) return null;
+  return response.json();
+}
+
 if (!App.requireAuth()) {
   // redirected
 }
@@ -84,6 +117,19 @@ function ensureStoryViewer() {
         <button id="story-tap-next" class="story-tap-zone story-nav-arrow story-tap-next" type="button" aria-label="Next story">›</button>
       </div>
       <p id="story-viewer-caption" class="notice"></p>
+      <form id="story-reply-form" class="story-reply-form">
+        <input id="story-reply-input" class="story-reply-input" type="text" maxlength="1000" placeholder="Reply to this story..." />
+        <button id="story-reply-send" class="story-reply-send" type="submit" aria-label="Send story reply">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M3 11.5L21 3l-8.5 18-2.4-6.1L3 11.5z"></path>
+            <path d="M10.1 14.9L21 3"></path>
+          </svg>
+        </button>
+      </form>
+      <div class="story-reply-meta">
+        <p id="story-reply-status" class="notice story-reply-status"></p>
+        <button id="story-reply-login-btn" class="story-reply-login-btn hidden" type="button">Open Chats Login</button>
+      </div>
     </div>
   `;
   document.body.appendChild(modal);
@@ -148,6 +194,10 @@ function openStoryViewer(userId) {
   const progressEl = modal.querySelector("#story-progress");
   const mediaEl = modal.querySelector("#story-viewer-media");
   const captionEl = modal.querySelector("#story-viewer-caption");
+  const replyForm = modal.querySelector("#story-reply-form");
+  const replyInput = modal.querySelector("#story-reply-input");
+  const replyStatus = modal.querySelector("#story-reply-status");
+  const replyLoginBtn = modal.querySelector("#story-reply-login-btn");
   const counterEl = modal.querySelector("#story-counter");
   const tapPrev = modal.querySelector("#story-tap-prev");
   const tapNext = modal.querySelector("#story-tap-next");
@@ -159,6 +209,20 @@ function openStoryViewer(userId) {
   const isOwn = group.user.id === App.getAuthUser()?.id;
   const firstUnseenIndex = stories.findIndex((story) => !story.viewed_by_me);
   if (firstUnseenIndex >= 0) idx = firstUnseenIndex;
+  const imageDurationMs = 5000;
+  let storyPaused = false;
+  let imageProgressElapsedMs = 0;
+  let imageProgressStartMs = 0;
+
+  const resetReplyUi = () => {
+    if (replyInput) replyInput.value = "";
+    if (replyStatus) {
+      replyStatus.textContent = "";
+      replyStatus.innerHTML = "";
+    }
+    replyLoginBtn?.classList.add("hidden");
+    if (replyForm) replyForm.classList.remove("hidden");
+  };
 
   const stopAuto = () => {
     if (storyAutoTimer) {
@@ -175,6 +239,8 @@ function openStoryViewer(userId) {
       storyVideoEndedHandler = null;
     }
   };
+
+  const currentStory = () => stories[idx];
 
   const paintProgress = (currentProgress = 0) => {
     const safe = Math.max(0, Math.min(1, Number(currentProgress) || 0));
@@ -204,6 +270,68 @@ function openStoryViewer(userId) {
     tick();
   };
 
+  const pauseCurrentStory = () => {
+    if (storyPaused) return;
+    storyPaused = true;
+    const story = currentStory();
+    if (!story) return;
+    if (story.media_type === "video") {
+      const video = mediaEl.querySelector("video");
+      if (video) {
+        video.pause();
+        const duration =
+          Number.isFinite(video.duration) && video.duration > 0
+            ? video.duration
+            : Math.max(1, Number(story.duration_seconds || 0));
+        paintProgress(duration > 0 ? video.currentTime / duration : 0);
+      }
+    } else {
+      if (imageProgressStartMs) {
+        imageProgressElapsedMs += Math.max(0, performance.now() - imageProgressStartMs);
+        imageProgressStartMs = 0;
+      }
+      paintProgress(imageProgressElapsedMs / imageDurationMs);
+    }
+    if (storyAutoTimer) {
+      clearTimeout(storyAutoTimer);
+      storyAutoTimer = null;
+    }
+    if (storyProgressFrame) {
+      cancelAnimationFrame(storyProgressFrame);
+      storyProgressFrame = null;
+    }
+  };
+
+  const resumeCurrentStory = () => {
+    if (!storyPaused || modal.classList.contains("hidden")) return;
+    const story = currentStory();
+    if (!story) return;
+    storyPaused = false;
+    if (story.media_type === "video") {
+      const video = mediaEl.querySelector("video");
+      if (!video) return;
+      video.play().catch(() => {});
+      const readProgress = () => {
+        const duration =
+          Number.isFinite(video.duration) && video.duration > 0
+            ? video.duration
+            : Math.max(1, Number(story.duration_seconds || 0));
+        return duration > 0 ? video.currentTime / duration : 0;
+      };
+      startProgressLoop(readProgress, () => {
+        goNext().catch(() => {});
+      });
+      return;
+    }
+    imageProgressStartMs = performance.now();
+    startProgressLoop(
+      () => (imageProgressElapsedMs + Math.max(0, performance.now() - imageProgressStartMs)) / imageDurationMs,
+      () => {
+        goNext().catch(() => {});
+      }
+    );
+  };
+
   const goNext = async () => {
     if (idx < stories.length - 1) {
       idx += 1;
@@ -216,6 +344,9 @@ function openStoryViewer(userId) {
 
   const render = async () => {
     stopAuto();
+    storyPaused = false;
+    imageProgressElapsedMs = 0;
+    imageProgressStartMs = 0;
     const story = stories[idx];
     userEl.innerHTML = `
       <img src="${group.user.profile_photo_url || "/static/default-avatar.svg"}" alt="${group.user.username}" />
@@ -263,16 +394,24 @@ function openStoryViewer(userId) {
       image.alt = "Story";
       mediaEl.appendChild(image);
       renderStoryStickers(mediaEl, story);
-      const imageDurationMs = 5000;
-      const startedAt = performance.now();
+      imageProgressStartMs = performance.now();
       startProgressLoop(
-        () => (performance.now() - startedAt) / imageDurationMs,
+        () => (imageProgressElapsedMs + Math.max(0, performance.now() - imageProgressStartMs)) / imageDurationMs,
         () => {
           goNext().catch(() => {});
         }
       );
     }
     captionEl.textContent = story.caption || "No caption";
+    if (isOwn) {
+      replyForm?.classList.add("hidden");
+      if (replyStatus) {
+        replyStatus.textContent = "Story replies are available on other users' stories.";
+      }
+      replyLoginBtn?.classList.add("hidden");
+    } else {
+      resetReplyUi();
+    }
     prevBtn.disabled = idx === 0;
     nextBtn.disabled = idx === stories.length - 1;
 
@@ -306,12 +445,65 @@ function openStoryViewer(userId) {
   nextBtn.onclick = goNext;
   tapPrev.onclick = prevBtn.onclick;
   tapNext.onclick = goNext;
+  replyInput.onfocus = () => {
+    if (!isOwn) pauseCurrentStory();
+  };
+  replyInput.oninput = () => {
+    if (!isOwn) pauseCurrentStory();
+  };
+  replyInput.onblur = () => {
+    if (!isOwn && !(replyInput.value || "").trim()) {
+      resumeCurrentStory();
+    }
+  };
+  replyLoginBtn.onclick = () => {
+    window.location.href = `/chats?open_user_id=${group.user.id}`;
+  };
+  replyForm.onsubmit = async (event) => {
+    event.preventDefault();
+    if (isOwn) return;
+    const content = (replyInput?.value || "").trim();
+    if (!content) {
+      if (replyStatus) replyStatus.textContent = "Write a reply first.";
+      return;
+    }
+    const sendBtn = replyForm.querySelector(".story-reply-send");
+    if (sendBtn) sendBtn.disabled = true;
+    try {
+      const activeStory = currentStory();
+      const storyAttachment = activeStory ? `[[STEPNIX_SHARE_STORY:${activeStory.id}]]` : "";
+      const messageContent = [storyAttachment, content].filter(Boolean).join("\n");
+      await storyReplyChatApi(`/api/chat/messages/${group.user.id}`, {
+        method: "POST",
+        body: new URLSearchParams({ content: messageContent || content }),
+      });
+      if (replyInput) replyInput.value = "";
+      if (replyStatus) replyStatus.textContent = "Reply sent.";
+      replyLoginBtn?.classList.add("hidden");
+      resumeCurrentStory();
+      if (window.App && typeof window.App.playActionBurst === "function") {
+        window.App.playActionBurst(sendBtn, "✓");
+      }
+    } catch (error) {
+      const text = String(error.message || "");
+      if (text.includes("Chat login required") || text.includes("Chat session")) {
+        if (replyStatus) replyStatus.textContent = "Login to chat service first, then send your story reply.";
+        replyLoginBtn?.classList.remove("hidden");
+      } else if (replyStatus) {
+        replyStatus.textContent = text;
+      }
+    } finally {
+      if (sendBtn) sendBtn.disabled = false;
+    }
+  };
   modal.querySelector("#story-close-btn").onclick = () => {
     stopAuto();
+    resetReplyUi();
     modal.classList.add("hidden");
   };
   modal.querySelector(".story-viewer-backdrop").onclick = () => {
     stopAuto();
+    resetReplyUi();
     modal.classList.add("hidden");
   };
 
@@ -379,7 +571,7 @@ function renderResults() {
     const suggestionPool = q ? [] : [...allSuggestedUsers];
     let suggestionOffset = 0;
     filteredPosts.forEach((post, index) => {
-      feedRoot.appendChild(createPostCard(post, loadFeed));
+      feedRoot.appendChild(createPostCard(post));
       const shouldInsertSuggestion = !q && suggestionPool.length && (index + 1) % 4 === 0;
       if (!shouldInsertSuggestion) return;
       const chunk = suggestionPool.slice(suggestionOffset, suggestionOffset + 6);
@@ -390,14 +582,18 @@ function renderResults() {
   }
 
   if (!q) {
-    searchStatus.textContent = `Personalized feed mode: ${feedRankingMode} (${feedRankingLatencyMs}ms)`;
+    if (searchStatus) {
+      searchStatus.textContent = `Personalized feed mode: ${feedRankingMode} (${feedRankingLatencyMs}ms)`;
+    }
     userStatus.textContent = "";
     userResults.innerHTML = "";
     userResultsBox.classList.add("hidden");
     return;
   }
 
-  searchStatus.textContent = `${filteredPosts.length} post(s) matched "${searchInput.value.trim()}".`;
+  if (searchStatus) {
+    searchStatus.textContent = `${filteredPosts.length} post(s) matched "${searchInput.value.trim()}".`;
+  }
   renderUserMatches(searchInput.value.trim());
 }
 
@@ -541,7 +737,9 @@ async function focusSharedPostIfNeeded() {
   try {
     const me = await App.api("/api/auth/me");
     App.setAuth(App.getToken(), me);
-    whoami.textContent = `Logged in as @${me.username}`;
+    if (whoami) {
+      whoami.textContent = `Logged in as @${me.username}`;
+    }
     allUsers = await App.api("/api/users");
     searchInput.addEventListener("input", renderResults);
     await loadStories();
