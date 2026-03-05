@@ -640,7 +640,14 @@ function createPostCard(post, onUpdated) {
             0,
             Number(post.author.follower_count || 0) + (confirmedFollowing ? 1 : -1)
           );
-          if (onUpdated) onUpdated();
+          if (onUpdated) {
+            onUpdated({
+              type: "follow",
+              userId: Number(post.author.id || 0),
+              isFollowing: !!confirmedFollowing,
+              followerCount: Number(post.author.follower_count || 0),
+            });
+          }
         }
 
         // Refresh auth context in background.
@@ -802,7 +809,14 @@ function createPostCard(post, onUpdated) {
           confirmedLiked = !!result.liked_by_me;
         }
         paintLike(confirmedLiked);
-        if (onUpdated) onUpdated();
+        if (onUpdated) {
+          onUpdated({
+            type: "like",
+            postId: Number(post.id || 0),
+            likedByMe: !!confirmedLiked,
+            likeCount: Number(post.like_count || 0),
+          });
+        }
       }
     } catch (error) {
       desiredLiked = confirmedLiked;

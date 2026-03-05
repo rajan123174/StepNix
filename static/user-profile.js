@@ -116,6 +116,7 @@ async function loadUserProfile() {
   postCountEl.textContent = String(data.user.post_count || 0);
   followerCountEl.textContent = String(data.user.follower_count || 0);
   followingCountEl.textContent = String(data.user.following_count || 0);
+  let handleFollowEventFromCard = null;
 
   const isSelf = me && me.id === data.user.id;
   if (isSelf) {
@@ -133,10 +134,31 @@ async function loadUserProfile() {
     let confirmedFollowing = !!data.user.is_following;
     let desiredFollowing = confirmedFollowing;
 
-    const paintFollow = (isFollowing) => {
+    const syncCardFollowButtons = (isFollowing) => {
+      feedRoot.querySelectorAll(".follow-btn").forEach((btn) => {
+        btn.textContent = isFollowing ? "Following" : "Follow";
+        btn.classList.toggle("is-following", isFollowing);
+      });
+    };
+
+    const syncProfileFollowState = (isFollowing, followerCount) => {
       data.user.is_following = isFollowing;
+      data.user.follower_count = Math.max(0, Number(followerCount || 0));
+      followerCountEl.textContent = String(data.user.follower_count);
       followBtn.textContent = isFollowing ? "Following" : "Follow";
       followBtn.classList.toggle("is-following", isFollowing);
+      syncCardFollowButtons(isFollowing);
+    };
+
+    const refreshOpenFollowListIfNeeded = () => {
+      if (followListModal.classList.contains("hidden")) return;
+      if (currentFollowListType !== "followers") return;
+      void openFollowList("followers");
+    };
+
+    const paintFollow = (isFollowing) => {
+      const nextCount = Math.max(0, Number(data.user.follower_count || 0) + (isFollowing ? 1 : -1));
+      syncProfileFollowState(isFollowing, nextCount);
     };
 
     const syncFollowState = async () => {
@@ -152,8 +174,9 @@ async function loadUserProfile() {
           }
           confirmedFollowing = targetFollowing;
           const prev = Number(data.user.follower_count || 0);
-          data.user.follower_count = Math.max(0, prev + (confirmedFollowing ? 1 : -1));
-          followerCountEl.textContent = String(data.user.follower_count);
+          const nextCount = Math.max(0, prev + (confirmedFollowing ? 1 : -1));
+          syncProfileFollowState(confirmedFollowing, nextCount);
+          refreshOpenFollowListIfNeeded();
         }
 
         // Refresh auth context in background to avoid slowing button UX.
@@ -163,7 +186,7 @@ async function loadUserProfile() {
           .catch(() => {});
       } catch (error) {
         desiredFollowing = confirmedFollowing;
-        paintFollow(confirmedFollowing);
+        syncProfileFollowState(confirmedFollowing, data.user.follower_count || 0);
         alert(error.message);
       } finally {
         followSyncInFlight = false;
@@ -180,6 +203,14 @@ async function loadUserProfile() {
       }
       void syncFollowState();
     };
+
+    handleFollowEventFromCard = (event) => {
+      if (!event || event.type !== "follow") return;
+      if (Number(event.userId || 0) !== Number(data.user.id || 0)) return;
+      confirmedFollowing = !!event.isFollowing;
+      desiredFollowing = !!event.isFollowing;
+      syncProfileFollowState(!!event.isFollowing, Number(event.followerCount || data.user.follower_count || 0));
+    };
   }
 
   feedRoot.innerHTML = "";
@@ -189,7 +220,13 @@ async function loadUserProfile() {
   }
 
   data.posts.forEach((post) => {
-    feedRoot.appendChild(createPostCard(post, loadUserProfile));
+    feedRoot.appendChild(
+      createPostCard(post, (event) => {
+        if (typeof handleFollowEventFromCard === "function") {
+          handleFollowEventFromCard(event);
+        }
+      })
+    );
   });
 }
 
