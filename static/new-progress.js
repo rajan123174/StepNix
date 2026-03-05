@@ -200,10 +200,18 @@ form.addEventListener("submit", async (event) => {
     statusEl.textContent = streakJustIncreased
       ? `Progress posted. Streak up to ${streakCount}.`
       : `Progress posted. Current streak: ${streakCount}.`;
+    try {
+      if (result && result.id) {
+        sessionStorage.setItem("stepnix_just_posted", JSON.stringify(result));
+      }
+    } catch {
+      // ignore storage errors
+    }
     if (submitBtn) {
       submitBtn.disabled = false;
       submitBtn.textContent = "Publish";
     }
+    window.location.href = "/community-feed?posted=1";
   } catch (error) {
     statusEl.textContent = error.message;
     if (submitBtn) {

@@ -1867,6 +1867,47 @@ def _chat_notification_preview(raw_content: str) -> str:
     return content[:160]
 
 
+def _create_post_notifications_async(
+    *,
+    post_id: int,
+    actor_user_id: int,
+    goal_title: str,
+    mention_text: str,
+) -> None:
+    with suppress(Exception):
+        with Session(engine) as db_bg:
+            actor = db_bg.execute(select(User).where(User.id == actor_user_id)).scalars().first()
+            if not actor:
+                return
+            follower_ids = set(
+                db_bg.execute(select(UserFollow.follower_id).where(UserFollow.following_id == actor_user_id)).scalars().all()
+            )
+            mentioned_ids = _mentioned_user_ids(mention_text, db=db_bg, exclude_ids={actor_user_id})
+            created_notifications = _create_notifications(
+                db=db_bg,
+                recipient_ids=follower_ids - mentioned_ids,
+                actor_id=actor_user_id,
+                event_type="new_progress",
+                title=f"@{actor.username} posted new daily progress",
+                message=goal_title[:140],
+                post_id=post_id,
+            )
+            created_notifications.extend(
+                _create_notifications(
+                    db=db_bg,
+                    recipient_ids=mentioned_ids,
+                    actor_id=actor_user_id,
+                    event_type="post_mention",
+                    title=f"@{actor.username} mentioned you in a progress post",
+                    message=(mention_text or goal_title)[:160],
+                    post_id=post_id,
+                )
+            )
+            if created_notifications:
+                db_bg.commit()
+                _publish_notification_rows(created_notifications)
+
+
 def _require_user(
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
@@ -4040,6 +4081,7 @@ def create_post(
     day_experience: str = Form(""),
     timezone_offset_minutes: int = Form(0),
     screenshots: list[UploadFile] = File(default=[]),
+    background_tasks: BackgroundTasks | None = None,
     current_user: User = Depends(_require_user),
     db: Session = Depends(get_db),
 ):
@@ -4069,36 +4111,25 @@ def create_post(
         media_path = _save_post_media(file)
         db.add(PostImage(post_id=post.id, image_path=media_path))
 
-    follower_ids = set(
-        db.execute(select(UserFollow.follower_id).where(UserFollow.following_id == current_user.id)).scalars().all()
-    )
     mention_text = "\n".join(part for part in [caption_clean, day_experience_clean] if part)
-    mentioned_ids = _mentioned_user_ids(mention_text, db=db, exclude_ids={current_user.id})
-    created_notifications = _create_notifications(
-        db=db,
-        recipient_ids=follower_ids - mentioned_ids,
-        actor_id=current_user.id,
-        event_type="new_progress",
-        title=f"@{current_user.username} posted new daily progress",
-        message=goal_title_clean[:140],
-        post_id=post.id,
-    )
-    created_notifications.extend(
-        _create_notifications(
-            db=db,
-            recipient_ids=mentioned_ids,
-            actor_id=current_user.id,
-            event_type="post_mention",
-            title=f"@{current_user.username} mentioned you in a progress post",
-            message=(mention_text or goal_title_clean)[:160],
-            post_id=post.id,
-        )
-    )
-
     db.commit()
-    _publish_notification_rows(created_notifications)
     _bump_feed_cache_version()
     _bump_user_cache_version(current_user.id)
+    if background_tasks is not None:
+        background_tasks.add_task(
+            _create_post_notifications_async,
+            post_id=post.id,
+            actor_user_id=current_user.id,
+            goal_title=goal_title_clean,
+            mention_text=mention_text,
+        )
+    else:
+        _create_post_notifications_async(
+            post_id=post.id,
+            actor_user_id=current_user.id,
+            goal_title=goal_title_clean,
+            mention_text=mention_text,
+        )
 
     created = (
         db.execute(

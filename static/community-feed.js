@@ -18,6 +18,19 @@ let storyVideoEndedHandler = null;
 let storyProgressFrame = null;
 let sharedFocusApplied = false;
 
+function consumeJustPostedPost() {
+  try {
+    const raw = sessionStorage.getItem("stepnix_just_posted");
+    if (!raw) return null;
+    sessionStorage.removeItem("stepnix_just_posted");
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.id) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 function storyReplyDeviceId() {
   let id = localStorage.getItem("chatDeviceId");
   if (!id) {
@@ -85,6 +98,10 @@ function renderStoryStickers(mediaEl, story) {
 async function loadFeed() {
   const data = await App.api("/api/feed");
   allPosts = data.posts || [];
+  const justPosted = consumeJustPostedPost();
+  if (justPosted) {
+    allPosts = [justPosted, ...allPosts.filter((post) => Number(post.id) !== Number(justPosted.id))];
+  }
   allSuggestedUsers = data.suggested_users || [];
   feedRankingMode = data.ranking_mode || "heuristic";
   feedRankingLatencyMs = Number(data.ranking_latency_ms || 0);
