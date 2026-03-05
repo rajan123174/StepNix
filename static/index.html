@@ -3,82 +3,127 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Goal Journal</title>
+    <title>StepNix</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap"
-      rel="stylesheet"
-    />
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/landing.css?v=8" />
   </head>
   <body>
-    <div class="bg-orb orb-1"></div>
-    <div class="bg-orb orb-2"></div>
+    <div class="landing-bg" aria-hidden="true">
+      <div id="bg-grid" class="bg-grid"></div>
+      <div class="bg-overlay"></div>
+      <div class="bg-vignette"></div>
+    </div>
 
-    <header>
-      <h1>Goal Journal</h1>
-      <p>Share your day-by-day progress, screenshots, and keep momentum with community feedback.</p>
-    </header>
-
-    <main>
-      <section class="panel">
-        <h2>Create Profile</h2>
-        <form id="user-form" class="grid-form">
-          <input id="username" placeholder="Username (example: rajan_dev)" required />
-          <input id="full-name" placeholder="Full name" required />
-          <input id="bio" placeholder="Bio (optional)" />
-          <button type="submit">Create User</button>
-        </form>
-      </section>
-
-      <section class="panel">
-        <h2>New Daily Progress</h2>
-        <form id="post-form" class="grid-form" enctype="multipart/form-data">
-          <select id="post-user" required></select>
-          <input id="goal-title" placeholder="Goal title" required />
-          <textarea id="caption" placeholder="Caption for today's progress"></textarea>
-          <input id="screenshots" type="file" multiple accept="image/*" />
-          <button type="submit">Publish Progress</button>
-        </form>
-      </section>
-
-      <section class="panel">
-        <div class="feed-head">
-          <h2>Community Feed</h2>
-          <div class="filters">
-            <label for="feed-user">Profile feed:</label>
-            <select id="feed-user">
-              <option value="">All users</option>
-            </select>
-          </div>
+    <section class="landing-intro">
+      <div class="intro-content">
+        <img src="/static/stepnix-logo.svg?v=3" alt="StepNix logo" />
+        <h1>StepNix</h1>
+        <p class="intro-sub">Every big success starts with a small step..</p>
+        <p class="intro-highlight">Be consistent so you will be the next leader ........</p>
+        <div class="head-actions">
+          <a class="btn about-btn" href="/about">About</a>
+          <a class="btn ghost" href="/create-profile?mode=login">Login</a>
+          <a class="btn" href="/create-profile?mode=register">Register</a>
         </div>
-        <div id="feed" class="feed"></div>
+      </div>
+    </section>
+
+    <main id="details" class="hero-wrap">
+      <section class="hero-card">
+        <h3>About StepNix</h3>
+        <h2>Build Your Goal Journey Publicly, One Day At A Time</h2>
+        <p>
+          Share daily progress, screenshots, stories, and wins with a motivated community. Follow creators,
+          react, comment, and keep momentum until your goal becomes reality.
+        </p>
+        <p>
+          StepNix is designed for students, creators, founders, job seekers, and anyone who wants to turn
+          consistency into visible results. Your progress is not just saved, it becomes a journey others can learn from.
+        </p>
+        <div class="hero-actions">
+          <a class="btn" href="/create-profile?mode=register">Start Free</a>
+          <a class="btn ghost" href="/community-feed">Explore Community</a>
+        </div>
+      </section>
+
+      <section class="features-card">
+        <h3>What You Get In StepNix</h3>
+        <div class="feature-grid">
+          <article>
+            <h4>Personal Profiles</h4>
+            <p>
+              Create your identity with name, username, bio, and profile photo. Your profile keeps all your updates
+              in one place, with post count, followers, following, and your own visual post grid.
+            </p>
+          </article>
+          <article>
+            <h4>Daily Progress Posts</h4>
+            <p>
+              Publish daily goal updates with title, caption, “Today I Learned” notes, and multiple images.
+              This helps you track improvement and build a strong record of daily consistency.
+            </p>
+          </article>
+          <article>
+            <h4>Social Interactions</h4>
+            <p>
+              Engage through likes, comments, @mentions, and comment reactions. Conversations around each post
+              make learning collaborative and keep users accountable for their goals.
+            </p>
+          </article>
+          <article>
+            <h4>Stories (24h)</h4>
+            <p>
+              Share short image/video stories that stay for 24 hours. Story rings show new vs viewed updates,
+              and story playback moves automatically just like modern social platforms.
+            </p>
+          </article>
+          <article>
+            <h4>Followers + Discovery</h4>
+            <p>
+              Discover users through search by name or username, follow inspiring profiles, and build your
+              motivation circle. Follower/following counts update in real time.
+            </p>
+          </article>
+          <article>
+            <h4>Secure Account Access</h4>
+            <p>
+              Register and login with account-based identity. Forgot-password flow supports OTP email verification
+              before reset, helping keep account access secure and reliable.
+            </p>
+          </article>
+          <article>
+            <h4>Shareable Progress</h4>
+            <p>
+              Share posts externally and bring others into your journey. Shared links route visitors to login/register
+              first, then open the shared post inside StepNix.
+            </p>
+          </article>
+          <article>
+            <h4>Goal-Focused Design</h4>
+            <p>
+              The platform is built around one idea: reduce friction to daily action. Every interaction is focused on
+              helping users show up, learn, and keep moving toward long-term goals.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="goal-card">
+        <h3>Goal Of StepNix</h3>
+        <p>
+          StepNix exists to solve a common problem: people start goals with energy, then lose direction without
+          structure, visibility, and support. Our goal is to make progress public, measurable, and motivating.
+        </p>
+        <p>
+          By combining daily logging, community interaction, profile-based tracking, and short-form stories,
+          StepNix turns isolated effort into a shared growth system. The mission is simple:
+          help people stay consistent long enough to achieve meaningful success.
+        </p>
       </section>
     </main>
 
-    <template id="post-template">
-      <article class="post-card">
-        <div class="post-meta"></div>
-        <h3 class="post-goal"></h3>
-        <p class="post-caption"></p>
-        <div class="post-images"></div>
-        <div class="post-actions">
-          <button class="like-btn" type="button">Like</button>
-          <span class="like-count"></span>
-          <button class="comment-toggle" type="button">Comments</button>
-        </div>
-        <div class="comments hidden">
-          <div class="comment-list"></div>
-          <form class="comment-form">
-            <select class="comment-user" required></select>
-            <input class="comment-input" placeholder="Write a comment. Mention with @username" required />
-            <button type="submit">Post</button>
-          </form>
-        </div>
-      </article>
-    </template>
-
-    <script src="/static/app.js"></script>
+    <script src="/static/landing.js?v=8"></script>
   </body>
 </html>

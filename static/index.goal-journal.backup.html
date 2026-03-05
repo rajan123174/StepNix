@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Goal Journal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
+
+    <header>
+      <h1>Goal Journal</h1>
+      <p>Share your day-by-day progress, screenshots, and keep momentum with community feedback.</p>
+    </header>
+
+    <main>
+      <section class="panel">
+        <h2>Create Profile</h2>
+        <form id="user-form" class="grid-form">
+          <input id="username" placeholder="Username (example: rajan_dev)" required />
+          <input id="full-name" placeholder="Full name" required />
+          <input id="bio" placeholder="Bio (optional)" />
+          <button type="submit">Create User</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>New Daily Progress</h2>
+        <form id="post-form" class="grid-form" enctype="multipart/form-data">
+          <select id="post-user" required></select>
+          <input id="goal-title" placeholder="Goal title" required />
+          <textarea id="caption" placeholder="Caption for today's progress"></textarea>
+          <input id="screenshots" type="file" multiple accept="image/*" />
+          <button type="submit">Publish Progress</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="feed-head">
+          <h2>Community Feed</h2>
+          <div class="filters">
+            <label for="feed-user">Profile feed:</label>
+            <select id="feed-user">
+              <option value="">All users</option>
+            </select>
+          </div>
+        </div>
+        <div id="feed" class="feed"></div>
+      </section>
+    </main>
+
+    <template id="post-template">
+      <article class="post-card">
+        <div class="post-meta"></div>
+        <h3 class="post-goal"></h3>
+        <p class="post-caption"></p>
+        <div class="post-images"></div>
+        <div class="post-actions">
+          <button class="like-btn" type="button">Like</button>
+          <span class="like-count"></span>
+          <button class="comment-toggle" type="button">Comments</button>
+        </div>
+        <div class="comments hidden">
+          <div class="comment-list"></div>
+          <form class="comment-form">
+            <select class="comment-user" required></select>
+            <input class="comment-input" placeholder="Write a comment. Mention with @username" required />
+            <button type="submit">Post</button>
+          </form>
+        </div>
+      </article>
+    </template>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
