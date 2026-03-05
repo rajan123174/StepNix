@@ -11,6 +11,8 @@
     { "source": "/stories", "destination": "/stories.html" },
     { "source": "/chats", "destination": "/chats.html" },
     { "source": "/profile", "destination": "/profile.html" },
+    { "source": "/user/:id", "destination": "/user-profile.html" },
+    { "source": "/post/:id", "destination": "/shared-post.html" },
     { "source": "/settings", "destination": "/settings.html" },
     { "source": "/help-center", "destination": "/help-center.html" },
     { "source": "/shared-post", "destination": "/shared-post.html" }
