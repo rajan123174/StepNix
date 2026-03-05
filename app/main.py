@@ -142,6 +142,11 @@ AWS_SECRET_KEY = (os.getenv("AWS_SECRET_KEY") or "").strip()
 AWS_REGION = (os.getenv("AWS_REGION") or "us-east-1").strip()
 FAISS_INDEX_PATH = (os.getenv("FAISS_INDEX_PATH") or "").strip()
 API_BASE_URL = (os.getenv("API_BASE_URL") or "").strip().rstrip("/")
+S3_SIGNED_READ_URLS = os.getenv("S3_SIGNED_READ_URLS", "1").strip() == "1"
+try:
+    S3_SIGNED_READ_TTL_SECONDS = max(60, int(os.getenv("S3_SIGNED_READ_TTL_SECONDS", "3600") or "3600"))
+except ValueError:
+    S3_SIGNED_READ_TTL_SECONDS = 3600
 HELP_CENTER_EMAIL = "stepnix627@gmail.com"
 HELP_CENTER_TOPICS = {
     "bug": "Reported a bug",
@@ -1291,6 +1296,34 @@ def _public_media_url(path: str | None) -> str | None:
     if not value:
         return None
     if value.startswith("http://") or value.startswith("https://"):
+        # Normalize legacy absolute API URLs to current HTTPS domain.
+        if API_BASE_URL:
+            with suppress(Exception):
+                base_host = parse.urlparse(API_BASE_URL).netloc
+                parsed = parse.urlparse(value)
+                if parsed.netloc == base_host and parsed.scheme != "https":
+                    value = f"https://{base_host}{parsed.path or ''}"
+                    if parsed.query:
+                        value = f"{value}?{parsed.query}"
+        if value.startswith("http://13.62.19.83"):
+            value = value.replace("http://13.62.19.83", "https://api.stepnix.in", 1)
+        if value.startswith("http://api.stepnix.in"):
+            value = value.replace("http://api.stepnix.in", "https://api.stepnix.in", 1)
+
+        # If S3 objects are private, return short-lived signed read URLs.
+        if S3_SIGNED_READ_URLS and S3_BUCKET_NAME:
+            parsed = parse.urlparse(value)
+            host = (parsed.netloc or "").lower()
+            key = (parsed.path or "").lstrip("/")
+            if key and (host == f"{S3_BUCKET_NAME}.s3.amazonaws.com" or host.startswith(f"{S3_BUCKET_NAME}.s3.")):
+                client = _get_s3_client()
+                if client is not None:
+                    with suppress(Exception):
+                        return client.generate_presigned_url(
+                            "get_object",
+                            Params={"Bucket": S3_BUCKET_NAME, "Key": key},
+                            ExpiresIn=S3_SIGNED_READ_TTL_SECONDS,
+                        )
         return value
     normalized = f"/{value.lstrip('/')}"
     # Frontend runs on a different domain (Vercel), so return absolute URLs for API-hosted media.
