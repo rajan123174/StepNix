@@ -90,7 +90,9 @@ async function api(path, options = {}) {
     const error = await response
       .json()
       .catch(async () => ({ detail: (await response.text().catch(() => "")).trim() || `Request failed (${response.status})` }));
-    throw new Error(error.detail || `Request failed (${response.status})`);
+    const err = new Error(error.detail || `Request failed (${response.status})`);
+    err.status = response.status;
+    throw err;
   }
   if (response.status === 204) return null;
   return response.json();

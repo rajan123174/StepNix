@@ -747,7 +747,14 @@ async function focusSharedPostIfNeeded() {
     await loadFeed();
     await focusSharedPostIfNeeded();
   } catch (error) {
-    App.clearAuth();
-    window.location.href = "/create-profile";
+    if (error && Number(error.status) === 401) {
+      App.clearAuth();
+      window.location.href = "/create-profile";
+      return;
+    }
+    if (whoami) {
+      const message = (error && error.message) || "Failed to load feed.";
+      whoami.textContent = `Feed error: ${message}`;
+    }
   }
 })();
