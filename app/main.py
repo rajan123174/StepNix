@@ -130,6 +130,8 @@ APP_ENV = os.getenv("APP_ENV", "development").lower()
 ENFORCE_OTP_LIMITS = os.getenv("ENFORCE_OTP_LIMITS", "0" if APP_ENV == "development" else "1") == "1"
 FEED_RANKER_MODE = os.getenv("FEED_RANKER_MODE", "heuristic").strip().lower()
 FEED_CACHE_TTL_SECONDS = max(5, int(os.getenv("FEED_CACHE_TTL_SECONDS", "20") or "20"))
+PROFILE_CACHE_TTL_SECONDS = max(5, int(os.getenv("PROFILE_CACHE_TTL_SECONDS", "20") or "20"))
+FOLLOW_GRAPH_CACHE_TTL_SECONDS = max(5, int(os.getenv("FOLLOW_GRAPH_CACHE_TTL_SECONDS", "20") or "20"))
 try:
     _feed_dim_raw = int(os.getenv("FEED_EMBED_DIM", "256"))
 except ValueError:
@@ -289,6 +291,50 @@ def _bump_feed_cache_version() -> None:
 
 def _feed_cache_key(user_id: int) -> str:
     return f"feed:{user_id}:v{_feed_cache_version()}"
+
+
+def _user_cache_version_key(user_id: int) -> str:
+    return f"user:cache:version:{user_id}"
+
+
+def _user_cache_version(user_id: int) -> int:
+    raw = _redis_get(_user_cache_version_key(user_id))
+    if not raw:
+        return 0
+    try:
+        return int(raw)
+    except ValueError:
+        return 0
+
+
+def _bump_user_cache_version(*user_ids: int) -> None:
+    unique_user_ids = {user_id for user_id in user_ids if user_id}
+    for user_id in unique_user_ids:
+        _redis_incr(_user_cache_version_key(user_id))
+
+
+def _profile_cache_key(target_user_id: int, viewer_user_id: int) -> str:
+    return (
+        f"profile:{target_user_id}:viewer:{viewer_user_id}"
+        f":tv{_user_cache_version(target_user_id)}"
+        f":vv{_user_cache_version(viewer_user_id)}"
+    )
+
+
+def _followers_cache_key(target_user_id: int, viewer_user_id: int) -> str:
+    return (
+        f"followers:{target_user_id}:viewer:{viewer_user_id}"
+        f":tv{_user_cache_version(target_user_id)}"
+        f":vv{_user_cache_version(viewer_user_id)}"
+    )
+
+
+def _following_cache_key(target_user_id: int, viewer_user_id: int) -> str:
+    return (
+        f"following:{target_user_id}:viewer:{viewer_user_id}"
+        f":tv{_user_cache_version(target_user_id)}"
+        f":vv{_user_cache_version(viewer_user_id)}"
+    )
 
 
 def _notification_count_key(user_id: int) -> str:
@@ -2522,6 +2568,7 @@ def settings_update_profile_visibility(
         if target_id not in existing_by_target:
             db.add(UserVisibilityRule(owner_id=current_user.id, target_user_id=target_id, rule_type="profile"))
     db.commit()
+    _bump_user_cache_version(current_user.id)
     return {"detail": "Profile visibility updated.", "hidden_profile_user_ids": sorted(allowed_ids)}
 
 
@@ -2556,6 +2603,7 @@ def settings_block_user(
     if (not should_block) and row:
         db.delete(row)
     db.commit()
+    _bump_user_cache_version(current_user.id, target_user_id)
     return {"detail": ("User blocked." if should_block else "User unblocked."), "blocked": should_block}
 
 
@@ -3713,6 +3761,7 @@ def follow_user(user_id: int, current_user: User = Depends(_require_user), db: S
         db.commit()
         _publish_notification_rows(created_notifications)
         _bump_feed_cache_version()
+        _bump_user_cache_version(current_user.id, user_id)
 
     refreshed = db.execute(select(User).options(joinedload(User.profile_photo)).where(User.id == user_id)).scalars().first()
     if not refreshed:
@@ -3743,6 +3792,7 @@ def unfollow_user(user_id: int, current_user: User = Depends(_require_user), db:
         db.delete(existing)
         db.commit()
         _bump_feed_cache_version()
+        _bump_user_cache_version(current_user.id, user_id)
 
     refreshed = db.execute(select(User).options(joinedload(User.profile_photo)).where(User.id == user_id)).scalars().first()
     if not refreshed:
@@ -3804,6 +3854,14 @@ def user_followers(user_id: int, current_user: User = Depends(_require_user), db
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
+    cached_payload = _redis_get(_followers_cache_key(user_id, current_user.id))
+    if cached_payload:
+        try:
+            data = json.loads(cached_payload)
+            return [UserOut.model_validate(item) for item in data]
+        except Exception:
+            pass
+
     links = (
         db.execute(
             select(UserFollow)
@@ -3823,7 +3881,13 @@ def user_followers(user_id: int, current_user: User = Depends(_require_user), db
         .all()
     )
     by_id = {user.id: user for user in users}
-    return [_build_user_out(by_id[item_id], db, current_user.id) for item_id in ordered_ids if item_id in by_id]
+    response = [_build_user_out(by_id[item_id], db, current_user.id) for item_id in ordered_ids if item_id in by_id]
+    _redis_setex(
+        _followers_cache_key(user_id, current_user.id),
+        FOLLOW_GRAPH_CACHE_TTL_SECONDS,
+        json.dumps([item.model_dump(mode="json") for item in response]),
+    )
+    return response
 
 
 @app.get("/api/users/{user_id}/following", response_model=list[UserOut])
@@ -3831,6 +3895,14 @@ def user_following(user_id: int, current_user: User = Depends(_require_user), db
     target = db.execute(select(User).where(User.id == user_id)).scalars().first()
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
+
+    cached_payload = _redis_get(_following_cache_key(user_id, current_user.id))
+    if cached_payload:
+        try:
+            data = json.loads(cached_payload)
+            return [UserOut.model_validate(item) for item in data]
+        except Exception:
+            pass
 
     links = (
         db.execute(
@@ -3851,7 +3923,13 @@ def user_following(user_id: int, current_user: User = Depends(_require_user), db
         .all()
     )
     by_id = {user.id: user for user in users}
-    return [_build_user_out(by_id[item_id], db, current_user.id) for item_id in ordered_ids if item_id in by_id]
+    response = [_build_user_out(by_id[item_id], db, current_user.id) for item_id in ordered_ids if item_id in by_id]
+    _redis_setex(
+        _following_cache_key(user_id, current_user.id),
+        FOLLOW_GRAPH_CACHE_TTL_SECONDS,
+        json.dumps([item.model_dump(mode="json") for item in response]),
+    )
+    return response
 
 
 @app.post("/api/me/photo", response_model=UserOut)
@@ -3870,6 +3948,7 @@ def update_my_profile_photo(
     else:
         db.add(UserProfilePhoto(user_id=user.id, image_path=photo_path))
     db.commit()
+    _bump_user_cache_version(current_user.id)
 
     refreshed = db.execute(select(User).options(joinedload(User.profile_photo)).where(User.id == user.id)).scalars().first()
     if not refreshed:
@@ -3893,6 +3972,7 @@ def update_my_bio(
 
     user.bio = raw_bio
     db.commit()
+    _bump_user_cache_version(current_user.id)
     db.refresh(user)
     return _build_user_out(user, db, current_user.id)
 
@@ -3939,6 +4019,7 @@ def update_my_profile_details(
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=400, detail="Username already exists")
+    _bump_user_cache_version(current_user.id)
     db.refresh(user)
     return _build_user_out(user, db, current_user.id)
 
@@ -4008,6 +4089,7 @@ def create_post(
     db.commit()
     _publish_notification_rows(created_notifications)
     _bump_feed_cache_version()
+    _bump_user_cache_version(current_user.id)
 
     created = (
         db.execute(
@@ -4046,6 +4128,7 @@ def delete_post(post_id: int, current_user: User = Depends(_require_user), db: S
     db.delete(post)
     db.commit()
     _bump_feed_cache_version()
+    _bump_user_cache_version(current_user.id)
     return {"detail": "Post deleted"}
 
 
@@ -4848,6 +4931,13 @@ def public_user_profile(user_id: int, current_user: User = Depends(_require_user
             db.add(ProfileView(viewer_id=current_user.id, viewed_user_id=user.id))
             db.commit()
 
+    cached_payload = _redis_get(_profile_cache_key(user.id, current_user.id))
+    if cached_payload:
+        try:
+            return ProfileOut.model_validate_json(cached_payload)
+        except Exception:
+            pass
+
     posts = (
         db.execute(
             select(Post)
@@ -4865,10 +4955,16 @@ def public_user_profile(user_id: int, current_user: User = Depends(_require_user
         .all()
     )
 
-    return ProfileOut(
+    response = ProfileOut(
         user=_build_user_out(user, db, current_user.id),
         posts=[_build_post_out(post, db, current_user.id) for post in posts],
     )
+    _redis_setex(
+        _profile_cache_key(user.id, current_user.id),
+        PROFILE_CACHE_TTL_SECONDS,
+        response.model_dump_json(),
+    )
+    return response
 
 
 @app.get("/api/me/profile", response_model=ProfileOut)
@@ -4970,13 +5066,15 @@ def like_post(post_id: int, current_user: User = Depends(_require_user), db: Ses
         _publish_notification_rows(created_notifications)
     if created_like:
         _bump_feed_cache_version()
+        _bump_user_cache_version(post.author_id, current_user.id)
     count = db.query(PostLike).filter(PostLike.post_id == post_id).count()
     return {"like_count": count}
 
 
 @app.delete("/api/posts/{post_id}/likes")
 def unlike_post(post_id: int, current_user: User = Depends(_require_user), db: Session = Depends(get_db)):
-    if not db.get(Post, post_id):
+    post = db.get(Post, post_id)
+    if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 
     like = (
@@ -4993,6 +5091,7 @@ def unlike_post(post_id: int, current_user: User = Depends(_require_user), db: S
         db.delete(like)
         db.commit()
         _bump_feed_cache_version()
+        _bump_user_cache_version(post.author_id, current_user.id)
     count = db.query(PostLike).filter(PostLike.post_id == post_id).count()
     return {"like_count": count}
 
@@ -5117,6 +5216,7 @@ def add_comment(
         db.commit()
         _publish_notification_rows(created_notifications)
     _bump_feed_cache_version()
+    _bump_user_cache_version(post.author_id, current_user.id)
 
     return CommentOut(
         id=comment.id,
