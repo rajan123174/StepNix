@@ -4076,14 +4076,14 @@ def update_my_profile_details(
 
 @app.post("/api/posts", response_model=PostOut)
 def create_post(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(_require_user),
+    db: Session = Depends(get_db),
     goal_title: str = Form(...),
     caption: str = Form(""),
     day_experience: str = Form(""),
     timezone_offset_minutes: int = Form(0),
     screenshots: list[UploadFile] = File(default=[]),
-    background_tasks: BackgroundTasks | None = None,
-    current_user: User = Depends(_require_user),
-    db: Session = Depends(get_db),
 ):
     goal_title_clean = goal_title.strip()
     caption_clean = caption.strip()
@@ -4115,21 +4115,13 @@ def create_post(
     db.commit()
     _bump_feed_cache_version()
     _bump_user_cache_version(current_user.id)
-    if background_tasks is not None:
-        background_tasks.add_task(
-            _create_post_notifications_async,
-            post_id=post.id,
-            actor_user_id=current_user.id,
-            goal_title=goal_title_clean,
-            mention_text=mention_text,
-        )
-    else:
-        _create_post_notifications_async(
-            post_id=post.id,
-            actor_user_id=current_user.id,
-            goal_title=goal_title_clean,
-            mention_text=mention_text,
-        )
+    background_tasks.add_task(
+        _create_post_notifications_async,
+        post_id=post.id,
+        actor_user_id=current_user.id,
+        goal_title=goal_title_clean,
+        mention_text=mention_text,
+    )
 
     created = (
         db.execute(
