@@ -614,9 +614,11 @@ function createPostCard(post, onUpdated) {
   }
 
   if (followBtn) {
+    const authorId = Number(post.author.id || 0);
     let followSyncInFlight = false;
     let confirmedFollowing = !!post.author.is_following;
     let desiredFollowing = confirmedFollowing;
+    let confirmedFollowerCount = Math.max(0, Number(post.author.follower_count || 0));
 
     const paintFollow = (isFollowing) => {
       post.author.is_following = isFollowing;
@@ -636,16 +638,18 @@ function createPostCard(post, onUpdated) {
             await App.api(`/api/users/${post.author.id}/follow`, { method: "DELETE" });
           }
           confirmedFollowing = targetFollowing;
-          post.author.follower_count = Math.max(
-            0,
-            Number(post.author.follower_count || 0) + (confirmedFollowing ? 1 : -1)
-          );
+          confirmedFollowerCount = Math.max(0, Number(post.author.follower_count || confirmedFollowerCount));
+          App.publishFollowState({
+            userId: authorId,
+            isFollowing: confirmedFollowing,
+            followerCount: confirmedFollowerCount,
+          });
           if (onUpdated) {
             onUpdated({
               type: "follow",
-              userId: Number(post.author.id || 0),
+              userId: authorId,
               isFollowing: !!confirmedFollowing,
-              followerCount: Number(post.author.follower_count || 0),
+              followerCount: confirmedFollowerCount,
             });
           }
         }
@@ -657,18 +661,63 @@ function createPostCard(post, onUpdated) {
           .catch(() => {});
       } catch (error) {
         desiredFollowing = confirmedFollowing;
+        post.author.follower_count = confirmedFollowerCount;
         paintFollow(confirmedFollowing);
+        App.publishFollowState({
+          userId: authorId,
+          isFollowing: confirmedFollowing,
+          followerCount: confirmedFollowerCount,
+        });
         alert(error.message);
       } finally {
         followSyncInFlight = false;
       }
     };
 
+    const external = App.getFollowState(authorId);
+    if (external) {
+      confirmedFollowing = !!external.isFollowing;
+      desiredFollowing = !!external.isFollowing;
+      if (Number.isFinite(Number(external.followerCount))) {
+        confirmedFollowerCount = Math.max(0, Number(external.followerCount));
+        post.author.follower_count = confirmedFollowerCount;
+      }
+      paintFollow(confirmedFollowing);
+    }
+
+    const unsubscribeFollowSync = App.onFollowStateChange((state) => {
+      if (!state || state.userId !== authorId) return;
+      confirmedFollowing = !!state.isFollowing;
+      desiredFollowing = !!state.isFollowing;
+      if (Number.isFinite(Number(state.followerCount))) {
+        confirmedFollowerCount = Math.max(0, Number(state.followerCount));
+        post.author.follower_count = confirmedFollowerCount;
+      }
+      paintFollow(confirmedFollowing);
+    });
+
+    const teardownFollowSyncIfDetached = () => {
+      if (document.body.contains(wrapper)) return;
+      unsubscribeFollowSync();
+      window.clearInterval(detachTimer);
+    };
+    const detachTimer = window.setInterval(teardownFollowSyncIfDetached, 3000);
+
     followBtn.addEventListener("click", async () => {
       const nextFollowing = !desiredFollowing;
       const wasDesiredFollowing = desiredFollowing;
       desiredFollowing = nextFollowing;
+      const nextFollowerCount = Math.max(
+        0,
+        Number(post.author.follower_count || confirmedFollowerCount) + (nextFollowing ? 1 : -1)
+      );
+      post.author.follower_count = nextFollowerCount;
       paintFollow(nextFollowing);
+      App.publishFollowState({
+        userId: authorId,
+        isFollowing: nextFollowing,
+        followerCount: nextFollowerCount,
+      });
       if (!wasDesiredFollowing && nextFollowing) {
         animate(followBtn, "✓");
       }

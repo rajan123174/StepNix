@@ -671,6 +671,10 @@ function createSuggestionCarouselCard(users) {
               await App.api(`/api/users/${userId}/follow`, { method: "DELETE" });
             }
             confirmedFollowing = targetFollowing;
+            App.publishFollowState({
+              userId,
+              isFollowing: confirmedFollowing,
+            });
             const target = allSuggestedUsers.find((row) => row.id === userId);
             if (target) target.is_following = confirmedFollowing;
           }
@@ -683,11 +687,34 @@ function createSuggestionCarouselCard(users) {
         }
       };
 
+      const external = App.getFollowState(userId);
+      if (external) {
+        confirmedFollowing = !!external.isFollowing;
+        desiredFollowing = !!external.isFollowing;
+        paintFollow(confirmedFollowing);
+      }
+
+      const unsubscribe = App.onFollowStateChange((state) => {
+        if (!state || Number(state.userId || 0) !== userId) return;
+        confirmedFollowing = !!state.isFollowing;
+        desiredFollowing = !!state.isFollowing;
+        paintFollow(confirmedFollowing);
+      });
+      const detachTimer = window.setInterval(() => {
+        if (document.body.contains(entry)) return;
+        unsubscribe();
+        window.clearInterval(detachTimer);
+      }, 3000);
+
       followBtn.addEventListener("click", async () => {
         const nextFollowing = !desiredFollowing;
         const wasDesiredFollowing = desiredFollowing;
         desiredFollowing = nextFollowing;
         paintFollow(nextFollowing);
+        App.publishFollowState({
+          userId,
+          isFollowing: nextFollowing,
+        });
         if (!wasDesiredFollowing && nextFollowing && window.App && typeof window.App.playActionBurst === "function") {
           window.App.playActionBurst(followBtn, "✓");
         }

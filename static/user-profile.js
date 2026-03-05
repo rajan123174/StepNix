@@ -21,6 +21,7 @@ const followListSearch = document.getElementById("public-follow-list-search");
 const followListClose = document.getElementById("public-follow-list-close");
 let currentFollowListUsers = [];
 let currentFollowListType = "followers";
+let unsubscribeProfileFollowSync = null;
 
 function normalizeFollowSearch(value) {
   return String(value || "")
@@ -106,6 +107,10 @@ async function loadUserProfile() {
   }
   const data = await App.api(`/api/users/${targetUserId}/profile`);
   const me = App.getAuthUser();
+  if (typeof unsubscribeProfileFollowSync === "function") {
+    unsubscribeProfileFollowSync();
+    unsubscribeProfileFollowSync = null;
+  }
 
   titleEl.textContent = `@${data.user.username}`;
   avatarEl.src = data.user.profile_photo_url || "/static/default-avatar.svg";
@@ -133,6 +138,7 @@ async function loadUserProfile() {
     let followSyncInFlight = false;
     let confirmedFollowing = !!data.user.is_following;
     let desiredFollowing = confirmedFollowing;
+    let confirmedFollowerCount = Math.max(0, Number(data.user.follower_count || 0));
 
     const syncCardFollowButtons = (isFollowing) => {
       feedRoot.querySelectorAll(".follow-btn").forEach((btn) => {
@@ -157,8 +163,7 @@ async function loadUserProfile() {
     };
 
     const paintFollow = (isFollowing) => {
-      const nextCount = Math.max(0, Number(data.user.follower_count || 0) + (isFollowing ? 1 : -1));
-      syncProfileFollowState(isFollowing, nextCount);
+      syncProfileFollowState(isFollowing, data.user.follower_count || confirmedFollowerCount);
     };
 
     const syncFollowState = async () => {
@@ -173,9 +178,13 @@ async function loadUserProfile() {
             await App.api(`/api/users/${data.user.id}/follow`, { method: "DELETE" });
           }
           confirmedFollowing = targetFollowing;
-          const prev = Number(data.user.follower_count || 0);
-          const nextCount = Math.max(0, prev + (confirmedFollowing ? 1 : -1));
-          syncProfileFollowState(confirmedFollowing, nextCount);
+          confirmedFollowerCount = Math.max(0, Number(data.user.follower_count || confirmedFollowerCount));
+          syncProfileFollowState(confirmedFollowing, confirmedFollowerCount);
+          App.publishFollowState({
+            userId: Number(data.user.id || 0),
+            isFollowing: confirmedFollowing,
+            followerCount: confirmedFollowerCount,
+          });
           refreshOpenFollowListIfNeeded();
         }
 
@@ -186,7 +195,13 @@ async function loadUserProfile() {
           .catch(() => {});
       } catch (error) {
         desiredFollowing = confirmedFollowing;
-        syncProfileFollowState(confirmedFollowing, data.user.follower_count || 0);
+        data.user.follower_count = confirmedFollowerCount;
+        syncProfileFollowState(confirmedFollowing, confirmedFollowerCount);
+        App.publishFollowState({
+          userId: Number(data.user.id || 0),
+          isFollowing: confirmedFollowing,
+          followerCount: confirmedFollowerCount,
+        });
         alert(error.message);
       } finally {
         followSyncInFlight = false;
@@ -197,20 +212,47 @@ async function loadUserProfile() {
       const nextFollowing = !desiredFollowing;
       const wasDesiredFollowing = desiredFollowing;
       desiredFollowing = nextFollowing;
+      const nextFollowerCount = Math.max(
+        0,
+        Number(data.user.follower_count || confirmedFollowerCount) + (nextFollowing ? 1 : -1)
+      );
+      data.user.follower_count = nextFollowerCount;
       paintFollow(nextFollowing);
+      App.publishFollowState({
+        userId: Number(data.user.id || 0),
+        isFollowing: nextFollowing,
+        followerCount: nextFollowerCount,
+      });
       if (!wasDesiredFollowing && nextFollowing && window.App && typeof window.App.playActionBurst === "function") {
         window.App.playActionBurst(followBtn, "✓");
       }
       void syncFollowState();
     };
 
+    const externalState = App.getFollowState(Number(data.user.id || 0));
+    if (externalState) {
+      confirmedFollowing = !!externalState.isFollowing;
+      desiredFollowing = !!externalState.isFollowing;
+      confirmedFollowerCount = Math.max(
+        0,
+        Number(externalState.followerCount || confirmedFollowerCount)
+      );
+      syncProfileFollowState(confirmedFollowing, confirmedFollowerCount);
+    }
+
     handleFollowEventFromCard = (event) => {
       if (!event || event.type !== "follow") return;
       if (Number(event.userId || 0) !== Number(data.user.id || 0)) return;
       confirmedFollowing = !!event.isFollowing;
       desiredFollowing = !!event.isFollowing;
-      syncProfileFollowState(!!event.isFollowing, Number(event.followerCount || data.user.follower_count || 0));
+      confirmedFollowerCount = Math.max(0, Number(event.followerCount || confirmedFollowerCount));
+      syncProfileFollowState(!!event.isFollowing, confirmedFollowerCount);
+      refreshOpenFollowListIfNeeded();
     };
+
+    unsubscribeProfileFollowSync = App.onFollowStateChange((state) => {
+      handleFollowEventFromCard({ type: "follow", ...state });
+    });
   }
 
   feedRoot.innerHTML = "";

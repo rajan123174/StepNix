@@ -837,6 +837,48 @@ function showConfirmDialog(message) {
   });
 }
 
+const followStateByUserId = new Map();
+const followStateListeners = new Set();
+
+function normalizeFollowState(payload) {
+  const userId = Number(payload && payload.userId);
+  if (!Number.isFinite(userId) || userId <= 0) return null;
+  const isFollowing = !!(payload && payload.isFollowing);
+  const state = { userId, isFollowing };
+  if (payload && Number.isFinite(Number(payload.followerCount))) {
+    state.followerCount = Math.max(0, Number(payload.followerCount));
+  }
+  return state;
+}
+
+function publishFollowState(payload) {
+  const state = normalizeFollowState(payload);
+  if (!state) return;
+  followStateByUserId.set(state.userId, state);
+  followStateListeners.forEach((listener) => {
+    try {
+      listener(state);
+    } catch {
+      // keep other listeners running
+    }
+  });
+  window.dispatchEvent(new CustomEvent("follow:changed", { detail: state }));
+}
+
+function getFollowState(userId) {
+  const key = Number(userId);
+  if (!Number.isFinite(key) || key <= 0) return null;
+  return followStateByUserId.get(key) || null;
+}
+
+function onFollowStateChange(listener) {
+  if (typeof listener !== "function") return () => {};
+  followStateListeners.add(listener);
+  return () => {
+    followStateListeners.delete(listener);
+  };
+}
+
 window.App = {
   api,
   setAuth,
@@ -856,4 +898,7 @@ window.App = {
   initGlassPageTransitions,
   initGlobalLogout,
   showConfirmDialog,
+  publishFollowState,
+  getFollowState,
+  onFollowStateChange,
 };
