@@ -141,6 +141,7 @@ AWS_ACCESS_KEY = (os.getenv("AWS_ACCESS_KEY") or "").strip()
 AWS_SECRET_KEY = (os.getenv("AWS_SECRET_KEY") or "").strip()
 AWS_REGION = (os.getenv("AWS_REGION") or "us-east-1").strip()
 FAISS_INDEX_PATH = (os.getenv("FAISS_INDEX_PATH") or "").strip()
+API_BASE_URL = (os.getenv("API_BASE_URL") or "").strip().rstrip("/")
 HELP_CENTER_EMAIL = "stepnix627@gmail.com"
 HELP_CENTER_TOPICS = {
     "bug": "Reported a bug",
@@ -1291,7 +1292,11 @@ def _public_media_url(path: str | None) -> str | None:
         return None
     if value.startswith("http://") or value.startswith("https://"):
         return value
-    return f"/{value.lstrip('/')}"
+    normalized = f"/{value.lstrip('/')}"
+    # Frontend runs on a different domain (Vercel), so return absolute URLs for API-hosted media.
+    if API_BASE_URL:
+        return f"{API_BASE_URL}{normalized}"
+    return normalized
 
 
 def _build_user_out(user: User, db: Session, viewer_id: int | None = None) -> UserOut:
