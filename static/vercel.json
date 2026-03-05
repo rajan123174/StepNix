@@ -1,0 +1,32 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": false,
+  "rewrites": [
+    { "source": "/static/:path*", "destination": "/:path*" },
+    { "source": "/", "destination": "/index.html" },
+    { "source": "/about", "destination": "/about.html" },
+    { "source": "/create-profile", "destination": "/create-profile.html" },
+    { "source": "/new-progress", "destination": "/new-progress.html" },
+    { "source": "/community-feed", "destination": "/community-feed.html" },
+    { "source": "/stories", "destination": "/stories.html" },
+    { "source": "/chats", "destination": "/chats.html" },
+    { "source": "/profile", "destination": "/profile.html" },
+    { "source": "/settings", "destination": "/settings.html" },
+    { "source": "/help-center", "destination": "/help-center.html" },
+    { "source": "/shared-post", "destination": "/shared-post.html" }
+  ],
+  "headers": [
+    {
+      "source": "/app-config.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, max-age=0" }
+      ]
+    },
+    {
+      "source": "/static/app-config.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, max-age=0" }
+      ]
+    }
+  ]
+}
