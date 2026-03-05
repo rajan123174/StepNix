@@ -129,41 +129,56 @@ async function loadUserProfile() {
     messageBtn.onclick = () => {
       window.location.href = `/chats?open_user_id=${data.user.id}`;
     };
-    followBtn.onclick = async () => {
-      if (followBtn.disabled) return;
-      const wasFollowing = !!data.user.is_following;
-      const nextFollowing = !wasFollowing;
-      const prevFollowerCount = Number(data.user.follower_count || 0);
-      followBtn.disabled = true;
-      data.user.is_following = nextFollowing;
-      data.user.follower_count = Math.max(0, prevFollowerCount + (nextFollowing ? 1 : -1));
-      followerCountEl.textContent = String(data.user.follower_count);
-      followBtn.textContent = nextFollowing ? "Following" : "Follow";
-      followBtn.classList.toggle("is-following", nextFollowing);
-      if (nextFollowing && window.App && typeof window.App.playActionBurst === "function") {
-        window.App.playActionBurst(followBtn, "✓");
-      }
+    let followSyncInFlight = false;
+    let confirmedFollowing = !!data.user.is_following;
+    let desiredFollowing = confirmedFollowing;
+
+    const paintFollow = (isFollowing) => {
+      data.user.is_following = isFollowing;
+      followBtn.textContent = isFollowing ? "Following" : "Follow";
+      followBtn.classList.toggle("is-following", isFollowing);
+    };
+
+    const syncFollowState = async () => {
+      if (followSyncInFlight) return;
+      followSyncInFlight = true;
       try {
-        if (wasFollowing) {
-          await App.api(`/api/users/${data.user.id}/follow`, { method: "DELETE" });
-        } else {
-          await App.api(`/api/users/${data.user.id}/follow`, { method: "POST" });
+        while (confirmedFollowing !== desiredFollowing) {
+          const targetFollowing = desiredFollowing;
+          if (targetFollowing) {
+            await App.api(`/api/users/${data.user.id}/follow`, { method: "POST" });
+          } else {
+            await App.api(`/api/users/${data.user.id}/follow`, { method: "DELETE" });
+          }
+          confirmedFollowing = targetFollowing;
+          const prev = Number(data.user.follower_count || 0);
+          data.user.follower_count = Math.max(0, prev + (confirmedFollowing ? 1 : -1));
+          followerCountEl.textContent = String(data.user.follower_count);
         }
+
         // Refresh auth context in background to avoid slowing button UX.
         Promise.resolve()
           .then(() => App.api("/api/auth/me"))
           .then((refreshedMe) => App.setAuth(App.getToken(), refreshedMe))
           .catch(() => {});
       } catch (error) {
-        data.user.is_following = wasFollowing;
-        data.user.follower_count = prevFollowerCount;
-        followerCountEl.textContent = String(prevFollowerCount);
-        followBtn.textContent = wasFollowing ? "Following" : "Follow";
-        followBtn.classList.toggle("is-following", wasFollowing);
+        desiredFollowing = confirmedFollowing;
+        paintFollow(confirmedFollowing);
         alert(error.message);
       } finally {
-        followBtn.disabled = false;
+        followSyncInFlight = false;
       }
+    };
+
+    followBtn.onclick = async () => {
+      const nextFollowing = !desiredFollowing;
+      const wasDesiredFollowing = desiredFollowing;
+      desiredFollowing = nextFollowing;
+      paintFollow(nextFollowing);
+      if (!wasDesiredFollowing && nextFollowing && window.App && typeof window.App.playActionBurst === "function") {
+        window.App.playActionBurst(followBtn, "✓");
+      }
+      void syncFollowState();
     };
   }
 

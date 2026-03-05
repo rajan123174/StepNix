@@ -650,32 +650,48 @@ function createSuggestionCarouselCard(users) {
       const followBtn = entry.querySelector(".suggest-follow-btn");
       const userId = Number(entry.getAttribute("data-user-id") || 0);
       if (!followBtn || !userId) return;
-      followBtn.addEventListener("click", async () => {
-        if (followBtn.disabled) return;
-        const isFollowing = followBtn.classList.contains("is-following");
-        const nextFollowing = !isFollowing;
-        followBtn.disabled = true;
-        followBtn.textContent = nextFollowing ? "Following" : "Follow";
-        followBtn.classList.toggle("is-following", nextFollowing);
-        if (nextFollowing && window.App && typeof window.App.playActionBurst === "function") {
-          window.App.playActionBurst(followBtn, "✓");
-        }
+      let followSyncInFlight = false;
+      let confirmedFollowing = followBtn.classList.contains("is-following");
+      let desiredFollowing = confirmedFollowing;
+
+      const paintFollow = (isFollowing) => {
+        followBtn.textContent = isFollowing ? "Following" : "Follow";
+        followBtn.classList.toggle("is-following", isFollowing);
+      };
+
+      const syncFollowState = async () => {
+        if (followSyncInFlight) return;
+        followSyncInFlight = true;
         try {
-          if (isFollowing) {
-            await App.api(`/api/users/${userId}/follow`, { method: "DELETE" });
-          } else {
-            await App.api(`/api/users/${userId}/follow`, { method: "POST" });
+          while (confirmedFollowing !== desiredFollowing) {
+            const targetFollowing = desiredFollowing;
+            if (targetFollowing) {
+              await App.api(`/api/users/${userId}/follow`, { method: "POST" });
+            } else {
+              await App.api(`/api/users/${userId}/follow`, { method: "DELETE" });
+            }
+            confirmedFollowing = targetFollowing;
+            const target = allSuggestedUsers.find((row) => row.id === userId);
+            if (target) target.is_following = confirmedFollowing;
           }
-          const target = allSuggestedUsers.find((row) => row.id === userId);
-          if (target) target.is_following = nextFollowing;
         } catch (error) {
-          // Roll back optimistic UI state.
-          followBtn.textContent = isFollowing ? "Following" : "Follow";
-          followBtn.classList.toggle("is-following", isFollowing);
+          desiredFollowing = confirmedFollowing;
+          paintFollow(confirmedFollowing);
           alert(error.message);
         } finally {
-          followBtn.disabled = false;
+          followSyncInFlight = false;
         }
+      };
+
+      followBtn.addEventListener("click", async () => {
+        const nextFollowing = !desiredFollowing;
+        const wasDesiredFollowing = desiredFollowing;
+        desiredFollowing = nextFollowing;
+        paintFollow(nextFollowing);
+        if (!wasDesiredFollowing && nextFollowing && window.App && typeof window.App.playActionBurst === "function") {
+          window.App.playActionBurst(followBtn, "✓");
+        }
+        void syncFollowState();
       });
     });
 

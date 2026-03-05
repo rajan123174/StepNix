@@ -614,40 +614,58 @@ function createPostCard(post, onUpdated) {
   }
 
   if (followBtn) {
-    followBtn.addEventListener("click", async () => {
-      if (followBtn.disabled) return;
-      const wasFollowing = !!post.author.is_following;
-      const nextFollowing = !wasFollowing;
-      followBtn.disabled = true;
-      post.author.is_following = nextFollowing;
-      post.author.follower_count = Math.max(0, (post.author.follower_count || 0) + (nextFollowing ? 1 : -1));
-      followBtn.textContent = nextFollowing ? "Following" : "Follow";
-      followBtn.classList.toggle("is-following", nextFollowing);
-      if (nextFollowing) {
-        animate(followBtn, "✓");
-      }
+    let followSyncInFlight = false;
+    let confirmedFollowing = !!post.author.is_following;
+    let desiredFollowing = confirmedFollowing;
+
+    const paintFollow = (isFollowing) => {
+      post.author.is_following = isFollowing;
+      followBtn.textContent = isFollowing ? "Following" : "Follow";
+      followBtn.classList.toggle("is-following", isFollowing);
+    };
+
+    const syncFollowState = async () => {
+      if (followSyncInFlight) return;
+      followSyncInFlight = true;
       try {
-        if (wasFollowing) {
-          await App.api(`/api/users/${post.author.id}/follow`, { method: "DELETE" });
-        } else {
-          await App.api(`/api/users/${post.author.id}/follow`, { method: "POST" });
+        while (confirmedFollowing !== desiredFollowing) {
+          const targetFollowing = desiredFollowing;
+          if (targetFollowing) {
+            await App.api(`/api/users/${post.author.id}/follow`, { method: "POST" });
+          } else {
+            await App.api(`/api/users/${post.author.id}/follow`, { method: "DELETE" });
+          }
+          confirmedFollowing = targetFollowing;
+          post.author.follower_count = Math.max(
+            0,
+            Number(post.author.follower_count || 0) + (confirmedFollowing ? 1 : -1)
+          );
+          if (onUpdated) onUpdated();
         }
-        // Refresh auth context in background so follow UI stays snappy.
+
+        // Refresh auth context in background.
         Promise.resolve()
           .then(() => App.api("/api/auth/me"))
           .then((me) => App.setAuth(App.getToken(), me))
           .catch(() => {});
-        if (onUpdated) onUpdated();
       } catch (error) {
-        // Roll back optimistic state on failure.
-        post.author.is_following = wasFollowing;
-        post.author.follower_count = Math.max(0, (post.author.follower_count || 0) + (wasFollowing ? 1 : -1));
-        followBtn.textContent = wasFollowing ? "Following" : "Follow";
-        followBtn.classList.toggle("is-following", wasFollowing);
+        desiredFollowing = confirmedFollowing;
+        paintFollow(confirmedFollowing);
         alert(error.message);
       } finally {
-        followBtn.disabled = false;
+        followSyncInFlight = false;
       }
+    };
+
+    followBtn.addEventListener("click", async () => {
+      const nextFollowing = !desiredFollowing;
+      const wasDesiredFollowing = desiredFollowing;
+      desiredFollowing = nextFollowing;
+      paintFollow(nextFollowing);
+      if (!wasDesiredFollowing && nextFollowing) {
+        animate(followBtn, "✓");
+      }
+      void syncFollowState();
     });
   }
 
@@ -758,36 +776,53 @@ function createPostCard(post, onUpdated) {
     });
   }
 
-  likeBtn.addEventListener("click", async () => {
-    if (likeBtn.disabled) return;
-    const wasLiked = !!post.liked_by_me;
-    likeBtn.disabled = true;
-    post.liked_by_me = !wasLiked;
-    post.like_count = Math.max(0, Number(post.like_count || 0) + (post.liked_by_me ? 1 : -1));
+  let likeSyncInFlight = false;
+  let confirmedLiked = !!post.liked_by_me;
+  let desiredLiked = confirmedLiked;
+
+  const paintLike = (liked) => {
+    post.liked_by_me = liked;
+    likeBtn.classList.toggle("is-active", liked);
     likeCount.textContent = `${post.like_count} likes`;
-    likeBtn.classList.toggle("is-active", !!post.liked_by_me);
-    if (post.liked_by_me) {
-      animate(likeBtn, "👍");
-    }
+  };
+
+  const syncLikeState = async () => {
+    if (likeSyncInFlight) return;
+    likeSyncInFlight = true;
     try {
-      const result = wasLiked
-        ? await App.api(`/api/posts/${post.id}/likes`, { method: "DELETE" })
-        : await App.api(`/api/posts/${post.id}/likes`, { method: "POST" });
-      post.like_count = result.like_count;
-      post.liked_by_me = result.liked_by_me;
-      likeCount.textContent = `${post.like_count} likes`;
-      likeBtn.classList.toggle("is-active", !!post.liked_by_me);
-      if (onUpdated) onUpdated();
+      while (confirmedLiked !== desiredLiked) {
+        const targetLiked = desiredLiked;
+        if (targetLiked) {
+          const result = await App.api(`/api/posts/${post.id}/likes`, { method: "POST" });
+          post.like_count = Number(result.like_count || 0);
+          confirmedLiked = !!result.liked_by_me;
+        } else {
+          const result = await App.api(`/api/posts/${post.id}/likes`, { method: "DELETE" });
+          post.like_count = Number(result.like_count || 0);
+          confirmedLiked = !!result.liked_by_me;
+        }
+        paintLike(confirmedLiked);
+        if (onUpdated) onUpdated();
+      }
     } catch (error) {
-      // Roll back optimistic state on failure.
-      post.liked_by_me = wasLiked;
-      post.like_count = Math.max(0, Number(post.like_count || 0) + (wasLiked ? 1 : -1));
-      likeCount.textContent = `${post.like_count} likes`;
-      likeBtn.classList.toggle("is-active", !!post.liked_by_me);
+      desiredLiked = confirmedLiked;
+      paintLike(confirmedLiked);
       alert(error.message);
     } finally {
-      likeBtn.disabled = false;
+      likeSyncInFlight = false;
     }
+  };
+
+  likeBtn.addEventListener("click", () => {
+    const nextLiked = !desiredLiked;
+    const wasDesiredLiked = desiredLiked;
+    desiredLiked = nextLiked;
+    post.like_count = Math.max(0, Number(post.like_count || 0) + (nextLiked ? 1 : -1));
+    paintLike(nextLiked);
+    if (!wasDesiredLiked && nextLiked) {
+      animate(likeBtn, "👍");
+    }
+    void syncLikeState();
   });
 
   likeCount.addEventListener("click", async () => {
