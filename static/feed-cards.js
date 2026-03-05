@@ -615,32 +615,38 @@ function createPostCard(post, onUpdated) {
 
   if (followBtn) {
     followBtn.addEventListener("click", async () => {
+      if (followBtn.disabled) return;
+      const wasFollowing = !!post.author.is_following;
+      const nextFollowing = !wasFollowing;
+      followBtn.disabled = true;
+      post.author.is_following = nextFollowing;
+      post.author.follower_count = Math.max(0, (post.author.follower_count || 0) + (nextFollowing ? 1 : -1));
+      followBtn.textContent = nextFollowing ? "Following" : "Follow";
+      followBtn.classList.toggle("is-following", nextFollowing);
+      if (nextFollowing) {
+        animate(followBtn, "✓");
+      }
       try {
-        let becameFollowing = false;
-        if (post.author.is_following) {
+        if (wasFollowing) {
           await App.api(`/api/users/${post.author.id}/follow`, { method: "DELETE" });
-          post.author.is_following = false;
-          post.author.follower_count = Math.max(0, (post.author.follower_count || 1) - 1);
         } else {
           await App.api(`/api/users/${post.author.id}/follow`, { method: "POST" });
-          post.author.is_following = true;
-          becameFollowing = true;
-          post.author.follower_count = (post.author.follower_count || 0) + 1;
         }
-        if (becameFollowing) {
-          animate(followBtn, "✓");
-        }
-        try {
-          const me = await App.api("/api/auth/me");
-          App.setAuth(App.getToken(), me);
-        } catch {
-          // Keep UI functional even if this refresh fails.
-        }
-        followBtn.textContent = post.author.is_following ? "Following" : "Follow";
-        followBtn.classList.toggle("is-following", post.author.is_following);
-        if (onUpdated) await onUpdated();
+        // Refresh auth context in background so follow UI stays snappy.
+        Promise.resolve()
+          .then(() => App.api("/api/auth/me"))
+          .then((me) => App.setAuth(App.getToken(), me))
+          .catch(() => {});
+        if (onUpdated) onUpdated();
       } catch (error) {
+        // Roll back optimistic state on failure.
+        post.author.is_following = wasFollowing;
+        post.author.follower_count = Math.max(0, (post.author.follower_count || 0) + (wasFollowing ? 1 : -1));
+        followBtn.textContent = wasFollowing ? "Following" : "Follow";
+        followBtn.classList.toggle("is-following", wasFollowing);
         alert(error.message);
+      } finally {
+        followBtn.disabled = false;
       }
     });
   }
@@ -753,20 +759,34 @@ function createPostCard(post, onUpdated) {
   }
 
   likeBtn.addEventListener("click", async () => {
+    if (likeBtn.disabled) return;
+    const wasLiked = !!post.liked_by_me;
+    likeBtn.disabled = true;
+    post.liked_by_me = !wasLiked;
+    post.like_count = Math.max(0, Number(post.like_count || 0) + (post.liked_by_me ? 1 : -1));
+    likeCount.textContent = `${post.like_count} likes`;
+    likeBtn.classList.toggle("is-active", !!post.liked_by_me);
+    if (post.liked_by_me) {
+      animate(likeBtn, "👍");
+    }
     try {
-      const result = post.liked_by_me
+      const result = wasLiked
         ? await App.api(`/api/posts/${post.id}/likes`, { method: "DELETE" })
         : await App.api(`/api/posts/${post.id}/likes`, { method: "POST" });
       post.like_count = result.like_count;
-      post.liked_by_me = !post.liked_by_me;
+      post.liked_by_me = result.liked_by_me;
       likeCount.textContent = `${post.like_count} likes`;
       likeBtn.classList.toggle("is-active", !!post.liked_by_me);
-      if (post.liked_by_me) {
-        animate(likeBtn, "👍");
-      }
-      if (onUpdated) await onUpdated();
+      if (onUpdated) onUpdated();
     } catch (error) {
+      // Roll back optimistic state on failure.
+      post.liked_by_me = wasLiked;
+      post.like_count = Math.max(0, Number(post.like_count || 0) + (wasLiked ? 1 : -1));
+      likeCount.textContent = `${post.like_count} likes`;
+      likeBtn.classList.toggle("is-active", !!post.liked_by_me);
       alert(error.message);
+    } finally {
+      likeBtn.disabled = false;
     }
   });
 

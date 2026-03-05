@@ -130,26 +130,39 @@ async function loadUserProfile() {
       window.location.href = `/chats?open_user_id=${data.user.id}`;
     };
     followBtn.onclick = async () => {
+      if (followBtn.disabled) return;
+      const wasFollowing = !!data.user.is_following;
+      const nextFollowing = !wasFollowing;
+      const prevFollowerCount = Number(data.user.follower_count || 0);
+      followBtn.disabled = true;
+      data.user.is_following = nextFollowing;
+      data.user.follower_count = Math.max(0, prevFollowerCount + (nextFollowing ? 1 : -1));
+      followerCountEl.textContent = String(data.user.follower_count);
+      followBtn.textContent = nextFollowing ? "Following" : "Follow";
+      followBtn.classList.toggle("is-following", nextFollowing);
+      if (nextFollowing && window.App && typeof window.App.playActionBurst === "function") {
+        window.App.playActionBurst(followBtn, "✓");
+      }
       try {
-        let becameFollowing = false;
-        if (data.user.is_following) {
+        if (wasFollowing) {
           await App.api(`/api/users/${data.user.id}/follow`, { method: "DELETE" });
         } else {
           await App.api(`/api/users/${data.user.id}/follow`, { method: "POST" });
-          becameFollowing = true;
         }
-        if (becameFollowing && window.App && typeof window.App.playActionBurst === "function") {
-          window.App.playActionBurst(followBtn, "✓");
-        }
-        try {
-          const refreshedMe = await App.api("/api/auth/me");
-          App.setAuth(App.getToken(), refreshedMe);
-        } catch {
-          // ignore
-        }
-        await loadUserProfile();
+        // Refresh auth context in background to avoid slowing button UX.
+        Promise.resolve()
+          .then(() => App.api("/api/auth/me"))
+          .then((refreshedMe) => App.setAuth(App.getToken(), refreshedMe))
+          .catch(() => {});
       } catch (error) {
+        data.user.is_following = wasFollowing;
+        data.user.follower_count = prevFollowerCount;
+        followerCountEl.textContent = String(prevFollowerCount);
+        followBtn.textContent = wasFollowing ? "Following" : "Follow";
+        followBtn.classList.toggle("is-following", wasFollowing);
         alert(error.message);
+      } finally {
+        followBtn.disabled = false;
       }
     };
   }
