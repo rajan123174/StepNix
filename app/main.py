@@ -4088,6 +4088,13 @@ def create_post(
     goal_title_clean = goal_title.strip()
     caption_clean = caption.strip()
     day_experience_clean = day_experience.strip()
+
+    media_paths: list[str] = []
+    for file in screenshots:
+        if not file.filename:
+            continue
+        media_paths.append(_save_post_media(file))
+
     now_utc = datetime.utcnow().replace(microsecond=0)
     new_streak_count, streak_just_increased = _resolve_streak_for_local_post(
         current_user,
@@ -4105,10 +4112,7 @@ def create_post(
     db.add(post)
     db.flush()
 
-    for file in screenshots:
-        if not file.filename:
-            continue
-        media_path = _save_post_media(file)
+    for media_path in media_paths:
         db.add(PostImage(post_id=post.id, image_path=media_path))
 
     mention_text = "\n".join(part for part in [caption_clean, day_experience_clean] if part)
