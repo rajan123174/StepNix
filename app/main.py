@@ -129,9 +129,10 @@ CHAT_OTP_EXPIRY_MINUTES = 5
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 ENFORCE_OTP_LIMITS = os.getenv("ENFORCE_OTP_LIMITS", "0" if APP_ENV == "development" else "1") == "1"
 FEED_RANKER_MODE = os.getenv("FEED_RANKER_MODE", "heuristic").strip().lower()
-FEED_CACHE_TTL_SECONDS = max(5, int(os.getenv("FEED_CACHE_TTL_SECONDS", "20") or "20"))
-PROFILE_CACHE_TTL_SECONDS = max(5, int(os.getenv("PROFILE_CACHE_TTL_SECONDS", "20") or "20"))
-FOLLOW_GRAPH_CACHE_TTL_SECONDS = max(5, int(os.getenv("FOLLOW_GRAPH_CACHE_TTL_SECONDS", "20") or "20"))
+FEED_CACHE_TTL_SECONDS = max(5, int(os.getenv("FEED_CACHE_TTL_SECONDS", "60") or "60"))
+PROFILE_CACHE_TTL_SECONDS = max(5, int(os.getenv("PROFILE_CACHE_TTL_SECONDS", "60") or "60"))
+FOLLOW_GRAPH_CACHE_TTL_SECONDS = max(5, int(os.getenv("FOLLOW_GRAPH_CACHE_TTL_SECONDS", "60") or "60"))
+USER_FEED_CACHE_TTL_SECONDS = max(5, int(os.getenv("USER_FEED_CACHE_TTL_SECONDS", "60") or "60"))
 try:
     _feed_dim_raw = int(os.getenv("FEED_EMBED_DIM", "256"))
 except ValueError:
@@ -332,6 +333,14 @@ def _followers_cache_key(target_user_id: int, viewer_user_id: int) -> str:
 def _following_cache_key(target_user_id: int, viewer_user_id: int) -> str:
     return (
         f"following:{target_user_id}:viewer:{viewer_user_id}"
+        f":tv{_user_cache_version(target_user_id)}"
+        f":vv{_user_cache_version(viewer_user_id)}"
+    )
+
+
+def _user_feed_cache_key(target_user_id: int, viewer_user_id: int) -> str:
+    return (
+        f"user_feed:{target_user_id}:viewer:{viewer_user_id}"
         f":tv{_user_cache_version(target_user_id)}"
         f":vv{_user_cache_version(viewer_user_id)}"
     )
@@ -4872,6 +4881,11 @@ def user_feed(user_id: int, current_user: User = Depends(_require_user), db: Ses
     if _is_blocked_between(current_user.id, user_id, db):
         return FeedOut(posts=[])
 
+    cached_payload = _redis_get(_user_feed_cache_key(user_id, current_user.id))
+    if cached_payload:
+        with suppress(Exception):
+            return FeedOut.model_validate_json(cached_payload)
+
     posts = (
         db.execute(
             select(Post)
@@ -4888,7 +4902,13 @@ def user_feed(user_id: int, current_user: User = Depends(_require_user), db: Ses
         .scalars()
         .all()
     )
-    return FeedOut(posts=[_build_post_out(post, db, current_user.id) for post in posts])
+    response = FeedOut(posts=[_build_post_out(post, db, current_user.id) for post in posts])
+    _redis_setex(
+        _user_feed_cache_key(user_id, current_user.id),
+        USER_FEED_CACHE_TTL_SECONDS,
+        response.model_dump_json(),
+    )
+    return response
 
 
 @app.get("/api/users/{user_id}/profile", response_model=ProfileOut)
